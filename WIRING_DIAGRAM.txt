@@ -1,0 +1,484 @@
+================================================================================
+                     🚁 DRONE FLIGHT CONTROLLER WIRING DIAGRAM
+================================================================================
+
+FLIGHT CONTROLLER (Arduino Nano)
+================================================================================
+
+                                  ┌─────────────┐
+                                  │  ARDUINO    │
+                                  │    NANO     │
+                                  │             │
+    ┌──────────────── D13 ──┬──── │   ATmega    │
+    │  ┌─────────────  D12 ──┤     │    328P     │
+    │  │  ┌────────── D11 ──┤     │             │
+    │  │  │  ┌───────  D10 ──┴──── │             │
+    │  │  │  │  ┌────   D9 ───┬─── │             │
+    │  │  │  │  │  ┌─   D8 ───┤    │             │
+    │  │  │  │  │  │    D7 ───┤    │             │
+    │  │  │  │  │  │    D6 ───┼─── │             │
+    │  │  │  │  │  │    D5 ───┼──┬ │             │
+    │  │  │  │  │  │    D4 ───┼──┤ │             │
+    │  │  │  │  │  │    D3 ───┼──┤ │             │
+    │  │  │  │  │  │    D2 ───┼──┤ │             │
+    │  │  │  │  │  │   GND ───┤  │ │             │
+    │  │  │  │  │  │  AREF    │  │ │             │
+    │  │  │  │  │  │   A0  ───┼──┤ │             │
+    │  │  │  │  │  │   A1     │  │ │             │
+    │  │  │  │  │  │   A2     │  │ │             │
+    │  │  │  │  │  │   A3  ───┼──┤ │             │
+    │  │  │  │  │  │   A4  ─┬─┼──┤ │             │
+    │  │  │  │  │  │   A5  ─┼─┼──┤ │             │
+    │  │  │  │  │  │   A6  ─┼─┼──┤ │             │
+    │  │  │  │  │  │   A7  ─┼─┼──┤ └─────────────┘
+    │  │  │  │  │  │  3.3V ─┼─┼──┤
+    │  │  │  │  │  │  5V  ──┼─┼──┤
+    │  │  │  │  │  │  VIN ──┼─┼──┤
+    │  │  │  │  │  │  GND ──┼─┼──┘
+    │  │  │  │  │  │        │ │
+    │  │  │  │  │  │        │ │   NRF24L01 MODULE
+    │  │  │  │  │  │        │ │   ┌──────────────────┐
+    │  │  │  │  │  │        │ │   │  [*]   [*]       │  <- Antenna
+    │  │  │  │  │  │        │ │   │   1     2     3  4│
+    ├──┼──┼──┼──┘  │        │ │   │  GND  VCC  CE CSN│
+    │  │  │  └─────┼────────┘ │   │                  │
+    │  │  │        │          │   │   5     6     7  8│
+    │  │  └────────┼──────────┘   │  SCK MOSI MISO IRQ│
+    │  │           │              └──────────────────┘
+    │  └───────────┘                   │   │    │
+    └──────────────────────────────────┴───┴────┘
+                                      SCK MOSI MISO
+
+    ⚠️  IMPORTANT: Add 10µF capacitor between NRF VCC and GND!
+    ⚠️  NRF uses 3.3V (NOT 5V!)
+
+================================================================================
+
+MOTOR ESCs (Signal Wires Only - Power from PDB/Battery)
+================================================================================
+
+        FRONT
+         / \
+    FL      FR     Motor Layout (X configuration)
+   (D3)    (D5)    
+    CCW     CW     Rotation Directions:
+      \   /        FL & RR: Counter-Clockwise (CCW) ↺
+       \ /         FR & RL: Clockwise (CW) ↻
+       / \
+      /   \
+    RL      RR
+   (D9)    (D6)
+    CW      CCW
+         |
+        REAR
+
+    ESC Wiring:
+    ┌─────────────┬──────────────┬───────────────────┐
+    │ ESC         │ Arduino Pin  │ Rotation          │
+    ├─────────────┼──────────────┼───────────────────┤
+    │ Front Left  │ D3           │ CCW (↺)           │
+    │ Front Right │ D5           │ CW  (↻)           │
+    │ Rear Right  │ D6           │ CCW (↺)           │
+    │ Rear Left   │ D9           │ CW  (↻)           │
+    └─────────────┴──────────────┴───────────────────┘
+
+    Each ESC:
+    ┌────────────┐
+    │    ESC     │
+    │            │
+    │ [R][B][Y]  │  <- Motor wires (swap any 2 to reverse)
+    │  │  │  │   │
+    │ [R][B][O]  │  <- Power: Red=Battery+, Black=GND, Orange=Signal
+    └──┼──┼──┼───┘
+       │  │  └──────> To Arduino Pin (D3/D5/D6/D9)
+       │  └─────────> Common GND
+       └────────────> Battery + (via PDB)
+
+================================================================================
+
+I2C SENSORS (MPU6050 + MS5611)
+================================================================================
+
+    MPU6050 Module               MS5611 Module
+    ┌──────────────┐             ┌──────────────┐
+    │   GY-521     │             │   MS5611     │
+    │   MPU6050    │             │  Barometer   │
+    │              │             │              │
+    │ VCC GND SCL  │             │ VCC GND SCL  │
+    │  │   │   │   │             │  │   │   │   │
+    │ SDA INT AD0  │             │ SDA CSB PS   │
+    └──┼───┼───┼───┘             └──┼───┼───────┘
+       │   │   │                    │   │
+       │   │   └────────────────┬───┘   │
+       │   │                    │       │
+       │   └────────────────────┼───────┘
+       │                        │
+       │                        │
+    To 5V                    To A5 (SCL)
+    To GND                   To A4 (SDA)
+
+    ⚠️  Both sensors share I2C bus (A4=SDA, A5=SCL)
+    ⚠️  MPU6050: Use 5V
+    ⚠️  MS5611: Check your module (3.3V or 5V tolerant)
+
+================================================================================
+
+BUTTONS (Active LOW with Internal Pullup)
+================================================================================
+
+    Calibration Button (A6)         Smooth Start Button (A7)
+    
+    ┌──────┐                         ┌──────┐
+    │      │                         │      │
+    │  ()  │  <- Push button         │  ()  │
+    │      │                         │      │
+    └──┬─┬─┘                         └──┬─┬─┘
+       │ │                              │ │
+       │ └──> GND                       │ └──> GND
+       └────> A6                        └────> A7
+
+    When pressed, pin reads LOW (0)
+    When released, pin reads HIGH (1) due to internal pullup
+
+================================================================================
+
+SWITCHES (SPDT)
+================================================================================
+
+    Arm/Disarm Switch (D4)          Altitude Hold Switch (D7)
+    
+         GND                             GND
+          │                               │
+       ┌──┴──┐                         ┌──┴──┐
+       │  o  │<- Common (to D4)        │  o  │<- Common (to D7)
+       └──┬──┘                         └──┬──┘
+       │  │  │                         │  │  │
+    GND  │ VCC                      GND  │ VCC
+         
+    Position 1 (DISARMED): D4 = HIGH    Position 1 (OFF): D7 = HIGH
+    Position 2 (ARMED):    D4 = LOW     Position 2 (ACTIVE): D7 = LOW
+
+================================================================================
+
+OUTPUTS (Buzzer & LED)
+================================================================================
+
+    Buzzer (Active Type)             LED Status Indicator
+    
+    ┌────────┐                       ┌───┐
+    │ [+][-] │                       │LED│ (flat side = -)
+    │ BUZZER │                       └─┬─┘
+    └───┬─┬──┘                         │
+        │ │                            │ (Anode, long leg)
+        │ └──> GND                     └──> A3
+        └────> D8
+                                    220Ω Resistor
+                                       │
+                                       └──> GND
+
+    Buzzer: Active type recommended (easier to use)
+    LED: Any color, 220Ω resistor required
+
+================================================================================
+
+BATTERY VOLTAGE DIVIDER (A0)
+================================================================================
+
+    Battery +
+       │
+       │
+      [R1]  1.5kΩ Resistor
+       │
+       ├────> A0 (Analog Read)
+       │
+      [R2]  1kΩ Resistor
+       │
+       └────> GND
+
+    Voltage Calculation:
+    - Max input: 12.5V (3S LiPo fully charged = 12.6V)
+    - Arduino reads 0-5V on A0
+    - Formula: Vbat = (Vadc × (R1 + R2)) / R2
+    - For 12.6V battery: A0 reads ~5.04V (within tolerance)
+
+================================================================================
+
+POWER DISTRIBUTION
+================================================================================
+
+    Battery (3S LiPo, 11.1V nominal)
+        │
+        ├──> ESC Power (directly)
+        │    │
+        │    └──> Motors
+        │
+        ├──> 5V Regulator (e.g., BEC or step-down module)
+        │    │
+        │    └──> Arduino VIN (or 5V pin)
+        │         │
+        │         ├──> MPU6050 (5V)
+        │         ├──> MS5611 (5V or 3.3V, check module)
+        │         └──> Buzzer (if 5V type)
+        │
+        └──> 3.3V Regulator
+             │
+             └──> NRF24L01 (3.3V ONLY!)
+
+    ⚠️  Common GND for all components!
+    ⚠️  NRF24L01 is 3.3V only - DO NOT use 5V!
+
+================================================================================
+
+COMPLETE WIRING TABLE - FLIGHT CONTROLLER
+================================================================================
+
+┌──────────────┬─────────────┬────────────────────────────────────────┐
+│ Arduino Pin  │ Connects To │ Description                            │
+├──────────────┼─────────────┼────────────────────────────────────────┤
+│ D2           │ NRF CE      │ NRF24L01 Chip Enable                   │
+│ D3           │ ESC FL      │ Front Left Motor ESC Signal            │
+│ D4           │ Switch      │ Arm/Disarm Switch (LOW=Armed)          │
+│ D5           │ ESC FR      │ Front Right Motor ESC Signal           │
+│ D6           │ ESC RR      │ Rear Right Motor ESC Signal            │
+│ D7           │ Switch      │ Altitude Hold Switch (LOW=Active)      │
+│ D8           │ Buzzer +    │ Active Buzzer Positive                 │
+│ D9           │ ESC RL      │ Rear Left Motor ESC Signal             │
+│ D10          │ NRF CSN     │ NRF24L01 Chip Select                   │
+│ D11          │ NRF MOSI    │ SPI Master Out Slave In                │
+│ D12          │ NRF MISO    │ SPI Master In Slave Out                │
+│ D13          │ NRF SCK     │ SPI Clock                              │
+│ A0           │ Voltage Div │ Battery Voltage Monitor                │
+│ A1           │ -           │ (Unused)                               │
+│ A2           │ -           │ (Unused)                               │
+│ A3           │ LED Anode   │ Status LED + (with 220Ω to GND)        │
+│ A4 (SDA)     │ I2C SDA     │ MPU6050 + MS5611 Data Line             │
+│ A5 (SCL)     │ I2C SCL     │ MPU6050 + MS5611 Clock Line            │
+│ A6           │ Button      │ Calibration Button (to GND)            │
+│ A7           │ Button      │ Smooth Motor Start Button (to GND)     │
+│ 3.3V         │ NRF VCC     │ NRF24L01 Power (with 10µF cap!)        │
+│ 5V           │ Sensors     │ MPU6050, MS5611 (if 5V tolerant)       │
+│ VIN          │ Battery+    │ 7-12V via regulator                    │
+│ GND          │ Common GND  │ All components share common ground     │
+└──────────────┴─────────────┴────────────────────────────────────────┘
+
+================================================================================
+
+
+================================================================================
+                    🎮 REMOTE CONTROLLER WIRING DIAGRAM
+================================================================================
+
+REMOTE CONTROLLER (Arduino Nano)
+================================================================================
+
+                                  ┌─────────────┐
+                                  │  ARDUINO    │
+                                  │    NANO     │
+                                  │             │
+    ┌──────────────── D13 ──┬──── │   ATmega    │
+    │  ┌─────────────  D12 ──┤     │    328P     │
+    │  │  ┌────────── D11 ──┤     │             │
+    │  │  │  ┌───────  D10 ──┴──── │             │
+    │  │  │  │  ┌────   D9 ───┬─── │             │
+    │  │  │  │  │  ┌─   D8 ───┤    │             │
+    │  │  │  │  │  │    D7     │    │             │
+    │  │  │  │  │  │    D6     │    │             │
+    │  │  │  │  │  │    D5     │    │             │
+    │  │  │  │  │  │    D4     │    │             │
+    │  │  │  │  │  │    D3     │    │             │
+    │  │  │  │  │  │    D2     │    │             │
+    │  │  │  │  │  │   GND ────┤    │             │
+    │  │  │  │  │  │  AREF     │    │             │
+    │  │  │  │  │  │   A0  ────┼──┬ │             │
+    │  │  │  │  │  │   A1  ────┼──┤ │             │
+    │  │  │  │  │  │   A2  ────┼──┤ │             │
+    │  │  │  │  │  │   A3  ────┼──┤ │             │
+    │  │  │  │  │  │   A4      │  │ │             │
+    │  │  │  │  │  │   A5      │  │ │             │
+    │  │  │  │  │  │   A6      │  │ │             │
+    │  │  │  │  │  │   A7      │  │ └─────────────┘
+    │  │  │  │  │  │  3.3V ────┼──┤
+    │  │  │  │  │  │  5V  ─────┼──┤
+    │  │  │  │  │  │  VIN      │  │
+    │  │  │  │  │  │  GND ─────┼──┘
+    │  │  │  │  │  │           │
+    │  │  │  │  │  │           │    NRF24L01 MODULE
+    │  │  │  │  │  │           │    (same as FC)
+    │  │  │  │  │  │           │    ⚠️  10µF cap!
+    ├──┼──┼──┼──┘  │           │    ⚠️  3.3V only!
+    │  │  │  └─────┼───────────┘
+    │  │  │        │
+    │  │  └────────┘
+    │  └───────────┘
+    └──────────────┘
+
+================================================================================
+
+JOYSTICKS (2× Two-Axis Analog)
+================================================================================
+
+    LEFT STICK                       RIGHT STICK
+    (Throttle & Yaw)                 (Pitch & Roll)
+
+    ┌──────────────┐                 ┌──────────────┐
+    │   ╔═══╗      │                 │   ╔═══╗      │
+    │   ║ L ║      │                 │   ║ R ║      │
+    │   ╚═══╝      │                 │   ╚═══╝      │
+    │              │                 │              │
+    │ VCC GND VRx  │                 │ VCC GND VRx  │
+    │  │   │   │   │                 │  │   │   │   │
+    │     VRy  SW  │                 │     VRy  SW  │
+    └──┼───┼───┼───┘                 └──┼───┼───┼───┘
+       │   │   │                        │   │   │
+       │   │   └─> A1 (Yaw)             │   │   └─> A3 (Roll)
+       │   │                            │   │
+       │   └─────> A0 (Throttle)        │   └─────> A2 (Pitch)
+       │                                │
+       └─> 5V                           └─> 5V
+       └─> GND                          └─> GND
+
+    Joystick Pinout (typical 5-pin):
+    1. VCC  -> 5V
+    2. GND  -> GND
+    3. VRx  -> Horizontal axis analog output
+    4. VRy  -> Vertical axis analog output
+    5. SW   -> Push button switch (optional, not used)
+
+================================================================================
+
+CONTROL MAPPING
+================================================================================
+
+        LEFT STICK                    RIGHT STICK
+         (A0, A1)                       (A2, A3)
+    
+          A0                             A2
+     Throttle ↑                      Pitch ↑
+            ↑ │                         ↑ │
+            │ │                         │ │
+    A1 ←────┼─┼────→ A1        A3 ←────┼─┼────→ A3
+     Yaw    │ │                  Roll   │ │
+            │ ↓                         │ ↓
+     Throttle ↓                      Pitch ↓
+
+    Function Mapping:
+    ┌──────────┬───────────────┬─────────────────────────┐
+    │ Pin      │ Function      │ Movement                │
+    ├──────────┼───────────────┼─────────────────────────┤
+    │ A0       │ Throttle      │ Up = increase altitude  │
+    │ A1       │ Yaw           │ Left = rotate CCW       │
+    │ A2       │ Pitch         │ Up = fly forward        │
+    │ A3       │ Roll          │ Right = fly right       │
+    └──────────┴───────────────┴─────────────────────────┘
+
+================================================================================
+
+STATUS LED (Optional)
+================================================================================
+
+    Status Indicator LED
+    
+    ┌───┐
+    │LED│
+    └─┬─┘
+      │
+      └──> D8
+          
+      220Ω
+       │
+       └──> GND
+
+    LED Behavior:
+    - ON: Successful transmission to FC
+    - OFF: Transmission failed (no ACK)
+
+================================================================================
+
+POWER (Remote Controller)
+================================================================================
+
+    Option 1: USB Power (for testing)
+    ┌──────────┐
+    │   USB    │
+    │  Cable   │
+    └────┬─────┘
+         │
+         └──> Arduino Nano USB port
+
+    Option 2: Battery Power (portable)
+    Battery (7-12V)
+        │
+        └──> Arduino VIN
+             │
+             ├──> 5V regulator (internal)
+             │    │
+             │    └──> Joysticks (5V)
+             │
+             └──> 3.3V regulator (internal)
+                  │
+                  └──> NRF24L01 (3.3V)
+
+    Recommended: 9V battery or 2S LiPo (7.4V)
+
+================================================================================
+
+COMPLETE WIRING TABLE - REMOTE CONTROLLER
+================================================================================
+
+┌──────────────┬─────────────────┬──────────────────────────────────┐
+│ Arduino Pin  │ Connects To     │ Description                      │
+├──────────────┼─────────────────┼──────────────────────────────────┤
+│ D9           │ NRF CE          │ NRF24L01 Chip Enable             │
+│ D10          │ NRF CSN         │ NRF24L01 Chip Select             │
+│ D11          │ NRF MOSI        │ SPI Master Out Slave In          │
+│ D12          │ NRF MISO        │ SPI Master In Slave Out          │
+│ D13          │ NRF SCK         │ SPI Clock                        │
+│ D8           │ LED Anode       │ Status LED (optional)            │
+│ A0           │ L Stick VRy     │ Throttle (Left stick Y)          │
+│ A1           │ L Stick VRx     │ Yaw (Left stick X)               │
+│ A2           │ R Stick VRy     │ Pitch (Right stick Y)            │
+│ A3           │ R Stick VRx     │ Roll (Right stick X)             │
+│ 3.3V         │ NRF VCC         │ NRF24L01 Power (10µF cap!)       │
+│ 5V           │ Joysticks VCC   │ Both joystick power              │
+│ VIN          │ Battery+ (opt)  │ 7-12V battery power              │
+│ GND          │ Common GND      │ All components                   │
+└──────────────┴─────────────────┴──────────────────────────────────┘
+
+================================================================================
+
+⚠️  CRITICAL REMINDERS
+================================================================================
+
+1. NRF24L01 MUST HAVE:
+   ✅ 10µF capacitor between VCC and GND (on module itself)
+   ✅ 3.3V power (NOT 5V!)
+   ✅ Short wires (< 10cm for SPI connections)
+
+2. MOTOR DIRECTIONS:
+   ✅ FL & RR: Counter-Clockwise (CCW) ↺
+   ✅ FR & RL: Clockwise (CW) ↻
+   ✅ Swap any 2 motor wires to reverse direction
+
+3. SAFETY:
+   ✅ Test all motors WITHOUT propellers first
+   ✅ Use smooth motor start feature (A7 button)
+   ✅ Verify LED shows disarmed when arm switch HIGH
+
+4. CALIBRATION:
+   ✅ Must be done on perfectly level surface
+   ✅ Calibrate before EVERY flight session
+   ✅ Hold calibration button (A6) for 2 full seconds
+
+5. COMMON GROUND:
+   ✅ Arduino GND, battery GND, all ESC GNDs must be connected
+   ✅ No ground = no communication!
+
+================================================================================
+
+📚 For complete setup instructions, see USER_MANUAL.md
+🔧 For pin assignments table, see PIN_MAPPING.md
+✅ For testing procedures, see TESTING_CHECKLIST.md
+
+================================================================================
+                          Happy Building! 🚁
+================================================================================
