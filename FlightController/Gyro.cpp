@@ -40,14 +40,19 @@ Gyro::Gyro() {
 // ============================================================================
 
 void Gyro::setupwire() {
-  // Initialize I2C
-  Wire.begin();
+  // Note: Wire.begin() should be called before this function
+  // We don't call it here to avoid double initialization
+  
+  Serial.println(F("  Waking up MPU6050..."));
   
   // Wake up MPU6050
   Wire.beginTransmission(0x68);
   Wire.write(0x6B);  // PWR_MGMT_1 register
   Wire.write(0x00);  // Set to zero to wake up
   Wire.endTransmission(true);
+  delay(50);
+  
+  Serial.println(F("  Configuring gyroscope..."));
   
   // Configure Gyroscope
   // FS_SEL = 1 (±500 deg/s, 65.5 LSB/deg/s)
@@ -55,13 +60,17 @@ void Gyro::setupwire() {
   Wire.write(0x1B);  // GYRO_CONFIG register
   Wire.write(0x08);  // FS_SEL = 1
   Wire.endTransmission();
+  delay(10);
+  
+  Serial.println(F("  Configuring accelerometer..."));
   
   // Configure Accelerometer
-  // AFS_SEL = 2 (±8g, 4096 LSB/g) - Note: original code used 0x10 which is ±8g
+  // AFS_SEL = 2 (±8g, 4096 LSB/g)
   Wire.beginTransmission(0x68);
   Wire.write(0x1C);  // ACCEL_CONFIG register
   Wire.write(0x10);  // AFS_SEL = 2 (±8g)
   Wire.endTransmission();
+  delay(10);
   
   // Configure Digital Low Pass Filter
   // DLPF_CFG = 3 (44Hz accelerometer, 42Hz gyroscope)
@@ -70,6 +79,7 @@ void Gyro::setupwire() {
   Wire.write(0x03);  // DLPF_CFG = 3
   Wire.endTransmission();
   
+  Serial.println(F("  MPU6050 configured"));
   delay(100);
 }
 
@@ -125,8 +135,19 @@ void Gyro::readingMPU() {
   // Request 14 bytes starting from ACCEL_XOUT_H (0x3B)
   Wire.beginTransmission(0x68);
   Wire.write(0x3B);
-  Wire.endTransmission(false);
-  Wire.requestFrom(0x68, 14, true);
+  byte error = Wire.endTransmission(false);
+  
+  if (error != 0) {
+    // I2C error, return without updating values
+    return;
+  }
+  
+  byte bytesReceived = Wire.requestFrom(0x68, 14, true);
+  
+  if (bytesReceived != 14) {
+    // Didn't receive all bytes, return without updating
+    return;
+  }
   
   // Read accelerometer data (6 bytes)
   RawAcc.x = (Wire.read() << 8) | Wire.read();  // ACCEL_XOUT
@@ -208,7 +229,11 @@ void Gyro::calibrateGyro() {
   double x = 0, y = 0, z = 0;
   const int n = 1500;
   
-  Serial.print(F("Calibrating gyro bias"));
+  Serial.println(F("Calibrating gyro bias (keep drone still)..."));
+  Serial.print(F("  Progress: ["));
+  
+  int progressMarks = 20;  // Number of progress markers
+  int samplesPerMark = n / progressMarks;
   
   for (int i = 0; i < n; i++) {
     readingMPU();
@@ -216,22 +241,27 @@ void Gyro::calibrateGyro() {
     y += RawGyro.y;
     z += RawGyro.z;
     
-    if (i % 300 == 0) {
-      Serial.print(F("."));
+    // Print progress bar
+    if (i % samplesPerMark == 0) {
+      Serial.print(F("#"));
     }
+    
+    // Small delay to prevent I2C overload
+    delayMicroseconds(500);
   }
+  
+  Serial.println(F("] Done"));
   
   GyroCal.x = x / n;
   GyroCal.y = y / n;
   GyroCal.z = z / n;
   
-  Serial.println(F(" Done"));
-  Serial.print(F("Gyro bias: X="));
-  Serial.print(GyroCal.x);
+  Serial.print(F("  Gyro bias: X="));
+  Serial.print(GyroCal.x, 1);
   Serial.print(F(" Y="));
-  Serial.print(GyroCal.y);
+  Serial.print(GyroCal.y, 1);
   Serial.print(F(" Z="));
-  Serial.println(GyroCal.z);
+  Serial.println(GyroCal.z, 1);
   
   delay(100);
 }

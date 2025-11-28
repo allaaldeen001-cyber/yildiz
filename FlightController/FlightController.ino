@@ -42,12 +42,12 @@
 
 #include <Servo.h>
 #include <SPI.h>
+#include <Wire.h>
+#include <EEPROM.h>
 #include "nRF24L01.h"
 #include "RF24.h"
-#include <EEPROM.h>
 #include "Gyro.h"
 #include <Smoothed.h>
-#include <Wire.h>
 #include "MS5611.h"
 
 // ============================================================================
@@ -242,6 +242,7 @@ bool debugging = false;
 void setupRadio();
 void setupMotors();
 void setupSensors();
+void scanI2C();
 void readInputs();
 bool receiveRadio();
 void checkStatus();
@@ -392,19 +393,91 @@ void setupMotors() {
   Serial.println(F("Motors attached"));
 }
 
+void scanI2C() {
+  Serial.println(F("Scanning I2C bus..."));
+  byte count = 0;
+  
+  for (byte addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    byte error = Wire.endTransmission();
+    
+    if (error == 0) {
+      Serial.print(F("  Found device at 0x"));
+      if (addr < 16) Serial.print("0");
+      Serial.print(addr, HEX);
+      
+      // Identify known devices
+      if (addr == 0x68 || addr == 0x69) {
+        Serial.print(F(" (MPU6050)"));
+      } else if (addr == 0x77 || addr == 0x76) {
+        Serial.print(F(" (MS5611/BMP)"));
+      }
+      Serial.println();
+      count++;
+    }
+  }
+  
+  if (count == 0) {
+    Serial.println(F("  No I2C devices found!"));
+    Serial.println(F("  Check wiring: SDA->A4, SCL->A5"));
+  } else {
+    Serial.print(F("  Found "));
+    Serial.print(count);
+    Serial.println(F(" device(s)"));
+  }
+}
+
 void setupSensors() {
+  // Initialize I2C
+  Wire.begin();
+  delay(100);
+  
+  // Scan for I2C devices first
+  scanI2C();
+  
+  // Check if MPU6050 is present
+  Wire.beginTransmission(0x68);
+  byte error = Wire.endTransmission();
+  
+  if (error != 0) {
+    Serial.println(F("ERROR: MPU6050 not found at 0x68!"));
+    Serial.println(F("Check wiring and try again."));
+    
+    // Blink LED and beep to indicate error
+    while (1) {
+      beep(500, 200);
+      digitalWrite(LED_PIN, HIGH);
+      delay(200);
+      digitalWrite(LED_PIN, LOW);
+      delay(800);
+    }
+  }
+  
+  Serial.println(F("MPU6050 found, initializing..."));
+  
   // Initialize gyro/accelerometer
   gyro.SetupWire(timepi);
+  Serial.println(F("MPU6050 ready"));
   delay(500);
   
-  // Initialize barometer
-  baro.begin();
-  baro.setOversampling(OSR_LOW);
+  // Check if MS5611 is present
+  Wire.beginTransmission(0x77);
+  error = Wire.endTransmission();
   
-  // Read initial ground pressure
-  delay(100);
-  baro.read();
-  ground_pressure = baro.getPressure();
+  if (error != 0) {
+    Serial.println(F("WARNING: MS5611 not found at 0x77"));
+    Serial.println(F("Altitude hold will be disabled"));
+  } else {
+    // Initialize barometer
+    baro.begin();
+    baro.setOversampling(OSR_LOW);
+    
+    // Read initial ground pressure
+    delay(100);
+    baro.read();
+    ground_pressure = baro.getPressure();
+    Serial.println(F("MS5611 ready"));
+  }
   
   Serial.println(F("Sensors initialized"));
 }
