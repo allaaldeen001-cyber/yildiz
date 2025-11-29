@@ -44,8 +44,6 @@ constexpr float STICK_EXPO = 0.25f;
 constexpr float ACC_LSB_PER_G = 16384.0f;
 constexpr float GYRO_LSB_PER_DPS = 131.0f;
 constexpr float GRAVITY = 9.80665f;
-constexpr float RAD_TO_DEG = 180.0f / PI;
-constexpr float DEG_TO_RAD = PI / 180.0f;
 constexpr uint16_t STATUS_LED_PULSE_MS = 120;
 constexpr uint16_t CALIBRATION_MAGIC = 0xDC42;
 
