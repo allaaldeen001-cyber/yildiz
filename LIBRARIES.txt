@@ -1,0 +1,35 @@
+Required Arduino Libraries for UAV Drone System
+================================================
+
+Install these libraries via Arduino IDE Library Manager:
+
+1. RF24 Library
+   - Name: RF24
+   - Author: TMRh20
+   - Version: Latest
+   - Installation: 
+     * Tools → Manage Libraries
+     * Search "RF24"
+     * Install "RF24" by TMRh20
+   - GitHub: https://github.com/nRF24/RF24
+
+2. Servo Library
+   - Usually included with Arduino IDE
+   - If missing, install "Servo" library
+
+3. Wire Library
+   - Included with Arduino IDE (for I2C communication with MPU6050)
+
+4. SPI Library
+   - Included with Arduino IDE (for NRF24L01 communication)
+
+Installation Steps:
+------------------
+1. Open Arduino IDE
+2. Go to Sketch → Include Library → Manage Libraries
+3. Search for "RF24"
+4. Click Install on "RF24" by TMRh20
+5. Restart Arduino IDE if prompted
+
+Note: All other libraries (Wire, SPI, Servo) should already be included
+      with your Arduino IDE installation.
