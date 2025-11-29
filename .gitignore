@@ -1,0 +1,76 @@
+# Arduino IDE files
+*.hex
+*.elf
+*.map
+*.lst
+*.sym
+*.lss
+
+# Build directories
+build/
+bin/
+
+# Arduino IDE backup files
+*~
+*.bak
+*.tmp
+
+# Mac OS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+
+# IDE specific
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Simulation files
+*.simu
+
+# Documentation build
+docs/_build/
+
+# Test files
+tests/
+
+# Logs
+*.log
+
+# Certificates and keys
+*.key
+*.pem
+*.cert
+
+# User-specific files
+user_config.h
+calibration_data.txt
+flight_logs/
+
+# Compiled library files
+*.a
+*.so
+*.dll
+
+# Python (if using test scripts)
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+
+# Backup files
+backup/
+old/
+archive/

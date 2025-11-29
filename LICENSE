@@ -1,0 +1,77 @@
+MIT License
+
+Copyright (c) 2025 Professional Arduino Nano Drone System
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+SAFETY DISCLAIMER:
+
+This software is designed for educational and hobbyist purposes. The authors
+and contributors assume NO LIABILITY for:
+
+1. Property damage caused by the drone
+2. Personal injury or death
+3. Violation of local aviation regulations
+4. Improper use or modification of the system
+5. Hardware failures or malfunctions
+
+Users are SOLELY RESPONSIBLE for:
+
+1. Safe operation of the drone
+2. Compliance with local laws and regulations
+3. Proper assembly and testing
+4. Maintaining safe flying practices
+5. Ensuring adequate insurance coverage
+
+ALWAYS:
+- Fly in open areas away from people and property
+- Follow local drone regulations
+- Keep line of sight with the drone
+- Respect privacy of others
+- Never fly near airports or restricted airspace
+- Maintain your equipment properly
+- Be prepared to disarm immediately in emergencies
+
+By using this software, you acknowledge and accept these terms and risks.
+
+---
+
+EXPORT COMPLIANCE:
+
+This software may be subject to export control regulations. Users are
+responsible for compliance with all applicable export laws and regulations
+in their jurisdiction.
+
+---
+
+THIRD-PARTY LICENSES:
+
+This project uses the following third-party libraries:
+
+1. RF24 Library by TMRh20
+   - License: GNU General Public License v2.0
+   - URL: https://github.com/nRF24/RF24
+
+2. Arduino Core Libraries
+   - License: GNU Lesser General Public License
+   - URL: https://www.arduino.cc/
+
+Users must comply with the licenses of all dependencies.

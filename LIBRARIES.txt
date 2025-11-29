@@ -1,0 +1,113 @@
+Arduino Libraries Required for Professional Drone System
+========================================================
+
+Install these libraries via Arduino IDE Library Manager:
+(Sketch → Include Library → Manage Libraries)
+
+REQUIRED LIBRARIES:
+-------------------
+
+1. RF24 by TMRh20
+   Version: 1.4.2 or later
+   Purpose: NRF24L01 wireless communication
+   URL: https://github.com/nRF24/RF24
+   
+   Installation:
+   - Open Library Manager
+   - Search "RF24"
+   - Install "RF24 by TMRh20"
+
+2. Wire (Built-in)
+   Purpose: I2C communication for MPU6050
+   Note: No installation needed, comes with Arduino IDE
+
+OPTIONAL LIBRARIES (for advanced features):
+-------------------------------------------
+
+3. MPU6050 by Electronic Cats
+   Version: 1.0.0 or later
+   Purpose: Simplified MPU6050 interface (if you want to use library instead of raw I2C)
+   Note: Current implementation uses direct I2C (Wire library)
+   
+   Alternative: Adafruit MPU6050
+   Version: 2.2.4 or later
+
+LIBRARY VERIFICATION:
+---------------------
+
+After installing, verify libraries are present:
+1. Open Arduino IDE
+2. Go to Sketch → Include Library
+3. Check that "RF24" appears in the list
+4. "Wire" should be under "Built-in Libraries"
+
+TROUBLESHOOTING:
+----------------
+
+If RF24 library not found:
+1. Download manually from: https://github.com/nRF24/RF24
+2. Click "Code" → "Download ZIP"
+3. In Arduino IDE: Sketch → Include Library → Add .ZIP Library
+4. Select downloaded RF24-master.zip
+
+If compilation errors with RF24:
+- Ensure you have version 1.4.0 or later
+- Check Tools → Board is set to "Arduino Nano"
+- Check Tools → Processor is set correctly (ATmega328P or ATmega328P Old Bootloader)
+
+DEPENDENCIES:
+-------------
+
+RF24 library automatically includes:
+- SPI.h (for NRF24L01 communication)
+- Arduino.h (core Arduino functions)
+
+Wire library automatically included with Arduino core.
+
+NO ADDITIONAL DEPENDENCIES REQUIRED.
+
+COMPATIBLE IDE VERSIONS:
+------------------------
+
+- Arduino IDE 1.8.13 or later
+- Arduino IDE 2.0 or later
+
+Both versions work equally well for this project.
+
+NOTES:
+------
+
+- This project intentionally uses minimal libraries for educational purposes
+- MPU6050 is accessed via raw I2C commands (no library dependency)
+- ESC control uses direct PWM (no Servo library needed for basic operation)
+- If you prefer cleaner code, you can optionally add:
+  * Servo.h (for more precise ESC control)
+  * MPU6050 library (for simplified sensor access)
+
+ADVANCED: Servo Library (Optional Enhancement)
+-----------------------------------------------
+
+For more precise ESC control, you can optionally use Servo library:
+
+In FlightController.ino, replace setMotorSpeed() function:
+
+#include <Servo.h>
+
+Servo esc1, esc2, esc3, esc4;
+
+void setup() {
+  esc1.attach(MOTOR_FL_PIN, 1000, 2000);
+  esc2.attach(MOTOR_FR_PIN, 1000, 2000);
+  esc3.attach(MOTOR_RR_PIN, 1000, 2000);
+  esc4.attach(MOTOR_RL_PIN, 1000, 2000);
+}
+
+void setMotorSpeed(uint8_t pin, uint16_t speed) {
+  if(pin == MOTOR_FL_PIN) esc1.writeMicroseconds(speed);
+  else if(pin == MOTOR_FR_PIN) esc2.writeMicroseconds(speed);
+  else if(pin == MOTOR_RR_PIN) esc3.writeMicroseconds(speed);
+  else if(pin == MOTOR_RL_PIN) esc4.writeMicroseconds(speed);
+}
+
+This provides true 1000-2000μs PWM pulses instead of analogWrite approximation.
+Recommended for final implementation.
