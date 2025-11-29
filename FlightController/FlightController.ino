@@ -5,7 +5,7 @@
  * 
  * Hardware: Arduino Nano
  * Author: Professional UAV Embedded Systems
- * Version: 1.0.0
+ * Version: 1.0.1
  * 
  * DESCRIPTION:
  * Advanced flight controller firmware with PID stabilization, wireless
@@ -82,6 +82,7 @@
 
 // Communication
 #define SIGNAL_TIMEOUT_MS   1000                // Failsafe timeout
+#define STARTUP_GRACE_PERIOD 5000               // 5 second grace period after boot
 #define CALIBRATION_SAMPLES 2000                // Gyro calibration samples
 
 // ============================================================================
@@ -150,6 +151,7 @@ uint16_t motorFL, motorFR, motorRR, motorRL;
 bool systemArmed = false;
 bool gyroCalibrated = false;
 bool escCalibrationMode = false;
+bool communicationEstablished = false;
 unsigned long lastRxTime = 0;
 unsigned long loopTimer;
 bool ledState = false;
@@ -226,7 +228,8 @@ void setup() {
   Serial.println(F("=== Flight Controller Ready ==="));
   buzzerBeep(100, 2, 100);
   
-  // Initialize loop timer
+  // Initialize timers - set lastRxTime to current time to prevent immediate failsafe
+  lastRxTime = millis();
   loopTimer = micros();
 }
 
@@ -251,7 +254,14 @@ void loop() {
     // Verify checksum
     uint8_t calcChecksum = calculateChecksum((uint8_t*)&rcData, sizeof(rcData) - 1);
     if (calcChecksum == rcData.checksum) {
-      // Valid data received - update LED
+      // Valid data received
+      if (!communicationEstablished) {
+        communicationEstablished = true;
+        Serial.println(F("*** COMMUNICATION ESTABLISHED ***"));
+        buzzerBeep(50, 2, 50);  // Quick double beep
+      }
+      
+      // Update LED
       if (millis() - ledTimer > 500) {
         ledState = !ledState;
         digitalWrite(STATUS_LED_PIN, ledState);
@@ -260,8 +270,8 @@ void loop() {
     }
   }
   
-  // Check for signal loss
-  if (millis() - lastRxTime > SIGNAL_TIMEOUT_MS) {
+  // Check for signal loss (skip during startup grace period)
+  if (millis() > STARTUP_GRACE_PERIOD && millis() - lastRxTime > SIGNAL_TIMEOUT_MS) {
     failsafe();
   }
   
@@ -697,6 +707,12 @@ void failsafe() {
     Serial.println(F("!!! FAILSAFE - SIGNAL LOST !!!"));
   }
   
+  // Mark communication as lost
+  if (communicationEstablished) {
+    communicationEstablished = false;
+    Serial.println(F("*** COMMUNICATION LOST ***"));
+  }
+  
   digitalWrite(STATUS_LED_PIN, LOW);
   
   // Clear RC data
@@ -728,11 +744,18 @@ void updateStatusLED() {
   if (systemArmed) {
     // Armed: Solid ON
     digitalWrite(STATUS_LED_PIN, HIGH);
+  } else if (!communicationEstablished) {
+    // No communication yet: Very fast blink (100ms)
+    if (millis() - ledTimer > 100) {
+      ledState = !ledState;
+      digitalWrite(STATUS_LED_PIN, ledState);
+      ledTimer = millis();
+    }
   } else if (gyroCalibrated) {
     // Calibrated but not armed: Slow blink (handled in main loop)
     // Already handled in main loop when receiving data
   } else {
-    // Not calibrated: Fast blink
+    // Not calibrated: Fast blink (200ms)
     if (millis() - ledTimer > 200) {
       ledState = !ledState;
       digitalWrite(STATUS_LED_PIN, ledState);

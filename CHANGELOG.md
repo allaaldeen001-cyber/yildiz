@@ -98,6 +98,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.1] - 2025-11-29
+
+### 🐛 Fixed
+- **CRITICAL**: Fixed flight controller disconnection issue after 6 seconds
+  - `lastRxTime` now initialized to `millis()` at boot instead of 0
+  - Added 5-second startup grace period to allow communication establishment
+  - System no longer triggers failsafe before RC can connect
+
+### ✨ Added
+- Communication status tracking with `communicationEstablished` flag
+- Audio feedback (2 quick beeps) when communication first establishes
+- Serial message "COMMUNICATION ESTABLISHED" for debugging
+- Improved LED status indication:
+  - Very fast blink (100ms): Waiting for RC connection
+  - Fast blink (200ms): Connected but not calibrated
+  - Slow blink (500ms): Calibrated and ready
+  - Solid: Armed
+- Communication loss/recovery messages in serial output
+
+### 🔧 Changed
+- Failsafe check now skips during first 5 seconds of operation
+- LED update logic improved to show connection status
+- Better serial debugging output for connection state
+
+---
+
 ## [Unreleased]
 
 ### Planned Features
