@@ -1,0 +1,70 @@
+MIT License
+
+Copyright (c) 2025 Professional Quadcopter Drone System
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+SAFETY DISCLAIMER:
+
+This project involves the construction and operation of a quadcopter drone,
+which can be dangerous if not handled properly. By using this software and
+hardware design, you acknowledge and accept the following:
+
+1. Drone operation carries inherent risks including but not limited to:
+   - Personal injury from propeller strikes
+   - Property damage
+   - Fire hazard from LiPo batteries
+   - Legal consequences from improper operation
+
+2. You are solely responsible for:
+   - Safe construction and testing
+   - Compliance with local drone regulations
+   - Proper battery handling and charging
+   - Operating in safe environments
+   - Maintaining your equipment
+
+3. The authors and contributors of this project:
+   - Provide no warranty of any kind
+   - Accept no liability for damages or injuries
+   - Make no guarantees of fitness for any purpose
+   - Strongly recommend proper training before operation
+
+4. Safety recommendations:
+   - Always remove propellers during testing
+   - Wear safety glasses
+   - Operate in open areas away from people
+   - Never fly indoors initially
+   - Follow local aviation regulations
+   - Use proper LiPo battery safety procedures
+   - Have fire extinguisher available
+   - Obtain proper insurance if required
+
+5. This is an educational project. Users should:
+   - Understand embedded systems and electronics
+   - Have soldering and assembly experience
+   - Research and understand drone operation
+   - Consider taking RC flying lessons
+   - Join local RC clubs for guidance
+
+BY USING THIS SOFTWARE AND HARDWARE DESIGN, YOU AGREE TO ASSUME ALL RISKS
+AND RESPONSIBILITIES ASSOCIATED WITH DRONE CONSTRUCTION AND OPERATION.
+
+USE AT YOUR OWN RISK.
