@@ -2,19 +2,22 @@
 
 A complete quadcopter flight control system with stabilization, PID control, and wireless communication.
 
-## 🔥 LATEST UPDATE: Stabilization Fix
+## 🔥 LATEST UPDATE: Version 2.1 - Button Functions Added!
 
-**Issue Fixed:** Motors now properly respond to MPU6050 tilting for stabilization!
+**New Features:**
+- ✅ **Button 1:** On-demand calibration (recalibrate without power cycling)
+- ✅ **Button 2:** Motor test mode (safe motor spin test)
+- ✅ **Button 3:** Buzzer finder (locate lost drone)
+- ✅ **Proper flight modes:** ANGLE (auto-level) vs ACRO (rate control)
+- ✅ **Enhanced debug output:** Clear status display in Serial Monitor
 
-**What's New:**
+**Previous Update: Stabilization Fix**
 - ✅ Real-time debugging output showing angles, PID, and motor speeds
-- ✅ Minimum throttle (1100µs) ensures stabilization is visible when testing
-- ✅ Clear motor response when tilting drone by hand
-- ✅ Easy verification that MPU6050 and PID are working
+- ✅ Motors respond properly to MPU6050 tilting
+- ✅ Minimum throttle (1100µs) for visible stabilization
 
-**Quick Test:** Upload code, ARM drone (no props!), tilt it by hand, watch motors respond!
-
-👉 **See:** `HOW_TO_TEST_STABILIZATION.md` for 5-minute test procedure
+👉 **See:** `BUTTON_FUNCTIONS_GUIDE.md` for complete button reference
+👉 **See:** `FEATURES_UPDATE_V2.1.md` for detailed changelog
 
 ## Hardware Components
 
@@ -54,17 +57,23 @@ A complete quadcopter flight control system with stabilization, PID control, and
 - ✅ **250Hz Control Loop** - Fast and responsive
 - ✅ **Complementary Filter** - Combines gyro and accelerometer data
 - ✅ **3-Axis PID Control** - Roll, Pitch, and Yaw stabilization
+- ✅ **Dual Flight Modes** - ANGLE (auto-level) and ACRO (rate control)
 - ✅ **Motor Mixing** - Quadcopter X configuration
-- ✅ **Automatic Calibration** - Sensor offset calibration on startup
+- ✅ **On-Demand Calibration** - Button 1 triggers recalibration
+- ✅ **Motor Test Mode** - Button 2 for safe motor testing
+- ✅ **Buzzer Finder** - Button 3 to locate lost drone
 - ✅ **Failsafe Protection** - Auto-disarm on signal loss
 - ✅ **Status Indicators** - LED and buzzer feedback
-- ✅ **Flight Modes** - Stabilize and Acro modes
+- ✅ **Enhanced Debugging** - Real-time flight data output
 
 ### Remote Controller
 - ✅ **50Hz Transmission** - Smooth control updates
 - ✅ **Joystick Calibration** - Auto-center calibration
+- ✅ **4 Push Buttons** - Calibration, Motor Test, Buzzer, Reserved
+- ✅ **2 Toggle Switches** - ARM/DISARM, ANGLE/ACRO mode
 - ✅ **Deadband Filtering** - Eliminates stick drift
 - ✅ **Connection Monitoring** - Real-time link status
+- ✅ **Enhanced Display** - Shows button states and flight mode
 - ✅ **Serial Debugging** - Live data monitoring
 
 ## Installation

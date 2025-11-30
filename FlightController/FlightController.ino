@@ -54,8 +54,9 @@
 // Flight modes
 #define MODE_DISARMED 0
 #define MODE_ARMED 1
-#define MODE_STABILIZE 2
-#define MODE_ACRO 3
+#define MODE_ANGLE 2      // Auto-level / Stabilize mode
+#define MODE_ACRO 3       // Manual / Rate mode
+#define MODE_MOTOR_TEST 4 // Motor test mode
 
 // PID Configuration
 #define PID_ROLL_KP 1.4
@@ -138,6 +139,15 @@ unsigned long lastReceiveTime = 0;
 unsigned long loopTimer;
 unsigned long lastDebugTime = 0;
 
+// Button states
+bool lastButton1 = false;
+bool lastButton2 = false;
+bool lastButton3 = false;
+bool motorTestActive = false;
+bool buzzerActive = false;
+unsigned long buzzerStartTime = 0;
+int motorTestSpeed = 1000;
+
 // ============================================
 // SETUP
 // ============================================
@@ -186,6 +196,9 @@ void loop() {
   // Read radio data
   receiveRadioData();
   
+  // Process button commands
+  processButtons();
+  
   // Read IMU
   readIMU();
   
@@ -193,7 +206,10 @@ void loop() {
   calculateAngles();
   
   // Process flight control
-  if (armed) {
+  if (motorTestActive) {
+    // Motor test mode - smooth ramp
+    runMotorTest();
+  } else if (armed) {
     calculatePID();
     mixMotors();
   } else {
@@ -212,6 +228,9 @@ void loop() {
   
   // Status indicators
   updateStatusLED();
+  
+  // Buzzer control
+  processBuzzer();
   
   // Debug output (every 100ms)
   printDebugInfo();
@@ -407,13 +426,28 @@ void calculateAngles() {
 // CALCULATE PID
 // ============================================
 void calculatePID() {
-  // Calculate setpoints from receiver input
-  pidRollSetpoint = rxData.roll / 10.0;   // Max ±50 degrees
-  pidPitchSetpoint = rxData.pitch / 10.0;
-  pidYawSetpoint = rxData.yaw / 2.0;      // Yaw rate
+  // Calculate setpoints based on flight mode
+  if (flightMode == MODE_ANGLE) {
+    // ANGLE MODE: Auto-level, stick input = desired angle
+    pidRollSetpoint = rxData.roll / 10.0;   // Max ±50 degrees
+    pidPitchSetpoint = rxData.pitch / 10.0;
+    pidYawSetpoint = rxData.yaw / 2.0;      // Yaw rate
+  } else {
+    // ACRO MODE: Manual rate control, stick input = rotation rate
+    pidRollSetpoint = rxData.roll / 5.0;    // Max ±100 deg/s
+    pidPitchSetpoint = rxData.pitch / 5.0;
+    pidYawSetpoint = rxData.yaw / 2.0;
+  }
   
   // Roll PID
-  float rollError = pidRollSetpoint - angleRoll;
+  float rollError;
+  if (flightMode == MODE_ANGLE) {
+    // Angle mode: Error is angle difference
+    rollError = pidRollSetpoint - angleRoll;
+  } else {
+    // Acro mode: Error is rate difference
+    rollError = pidRollSetpoint - gyroRollInput;
+  }
   pidRollI += PID_ROLL_KI * rollError;
   pidRollI = constrain(pidRollI, -PID_LIMIT, PID_LIMIT);
   pidRollD = PID_ROLL_KD * (rollError - pidRollPrev);
@@ -422,7 +456,14 @@ void calculatePID() {
   pidRollPrev = rollError;
   
   // Pitch PID
-  float pitchError = pidPitchSetpoint - anglePitch;
+  float pitchError;
+  if (flightMode == MODE_ANGLE) {
+    // Angle mode: Error is angle difference
+    pitchError = pidPitchSetpoint - anglePitch;
+  } else {
+    // Acro mode: Error is rate difference
+    pitchError = pidPitchSetpoint - gyroPitchInput;
+  }
   pidPitchI += PID_PITCH_KI * pitchError;
   pidPitchI = constrain(pidPitchI, -PID_LIMIT, PID_LIMIT);
   pidPitchD = PID_PITCH_KD * (pitchError - pidPitchPrev);
@@ -533,15 +574,101 @@ void receiveRadioData() {
 }
 
 // ============================================
+// PROCESS BUTTONS
+// ============================================
+void processButtons() {
+  // Button 1: Calibration (press to recalibrate gyro)
+  bool button1 = (rxData.buttons & 0x01);
+  if (button1 && !lastButton1 && !armed) {
+    Serial.println(F("Button 1: Starting calibration..."));
+    beep(1, 200);
+    calibrateSensors();
+  }
+  lastButton1 = button1;
+  
+  // Button 2: Motor Test Mode (hold to spin motors smoothly)
+  bool button2 = (rxData.buttons & 0x02);
+  if (button2 && !armed) {
+    if (!motorTestActive) {
+      motorTestActive = true;
+      motorTestSpeed = 1000;
+      Serial.println(F("Button 2: Motor test START"));
+      beep(1, 100);
+    }
+    // Gradually increase speed while held
+    if (motorTestSpeed < 1400) {
+      motorTestSpeed += 2;  // Slow ramp up
+    }
+  } else {
+    if (motorTestActive) {
+      motorTestActive = false;
+      motorTestSpeed = 1000;
+      stopMotors();
+      Serial.println(F("Button 2: Motor test STOP"));
+      beep(1, 100);
+    }
+  }
+  lastButton2 = button2;
+  
+  // Button 3: Buzzer Beep (toggle buzzer for finding drone)
+  bool button3 = (rxData.buttons & 0x04);
+  if (button3 && !lastButton3) {
+    buzzerActive = !buzzerActive;
+    if (buzzerActive) {
+      buzzerStartTime = millis();
+      Serial.println(F("Button 3: Buzzer ON (find mode)"));
+    } else {
+      digitalWrite(BUZZER_PIN, LOW);
+      Serial.println(F("Button 3: Buzzer OFF"));
+    }
+  }
+  lastButton3 = button3;
+}
+
+// ============================================
+// MOTOR TEST MODE
+// ============================================
+void runMotorTest() {
+  // Spin all motors at same speed for testing
+  motorFLSpeed = motorTestSpeed;
+  motorFRSpeed = motorTestSpeed;
+  motorRRSpeed = motorTestSpeed;
+  motorRLSpeed = motorTestSpeed;
+}
+
+// ============================================
+// BUZZER CONTROL
+// ============================================
+void processBuzzer() {
+  if (buzzerActive) {
+    // Beep pattern: 100ms on, 100ms off
+    unsigned long elapsed = millis() - buzzerStartTime;
+    if ((elapsed % 200) < 100) {
+      digitalWrite(BUZZER_PIN, HIGH);
+    } else {
+      digitalWrite(BUZZER_PIN, LOW);
+    }
+  }
+}
+
+// ============================================
 // PROCESS FLIGHT MODE
 // ============================================
 void processFlightMode() {
+  // Don't allow arming in motor test mode
+  if (motorTestActive) {
+    armed = false;
+    return;
+  }
+  
   // Check arming switch (SW1)
   bool armSwitch = (rxData.switches & 0x01);
   
   if (armSwitch && !armed && rxData.throttle < 1050) {
     // Arm the drone
     armed = true;
+    buzzerActive = false;  // Turn off buzzer when arming
+    digitalWrite(BUZZER_PIN, LOW);
     beep(1, 200);
     Serial.println(F("ARMED"));
   } else if (!armSwitch && armed) {
@@ -553,10 +680,14 @@ void processFlightMode() {
   }
   
   // Flight mode selection (SW2)
-  if (rxData.switches & 0x02) {
-    flightMode = MODE_STABILIZE;
-  } else {
-    flightMode = MODE_ACRO;
+  // SW2 ON = Angle Mode (auto-level)
+  // SW2 OFF = Acro Mode (manual rate control)
+  if (armed) {
+    if (rxData.switches & 0x02) {
+      flightMode = MODE_ANGLE;
+    } else {
+      flightMode = MODE_ACRO;
+    }
   }
   
   telemetry.armed = armed;
@@ -629,30 +760,45 @@ void printDebugInfo() {
   static unsigned long lastPrint = 0;
   
   if (millis() - lastPrint > 100) {  // Print every 100ms
-    Serial.print(F("ARM:"));
-    Serial.print(armed ? 1 : 0);
-    Serial.print(F(" | Angles R:"));
+    // Status
+    if (motorTestActive) {
+      Serial.print(F("MOTOR_TEST "));
+    } else if (armed) {
+      Serial.print(F("ARMED "));
+    } else {
+      Serial.print(F("DISARM "));
+    }
+    
+    // Flight mode
+    Serial.print(F("| Mode:"));
+    if (flightMode == MODE_ANGLE) {
+      Serial.print(F("ANGLE"));
+    } else if (flightMode == MODE_ACRO) {
+      Serial.print(F("ACRO"));
+    } else {
+      Serial.print(F("---"));
+    }
+    
+    // Angles
+    Serial.print(F(" | Ang R:"));
     Serial.print(angleRoll, 1);
     Serial.print(F(" P:"));
     Serial.print(anglePitch, 1);
-    Serial.print(F(" Y:"));
-    Serial.print(angleYaw, 1);
     
+    // Gyro rates
     Serial.print(F(" | Gyro R:"));
     Serial.print(gyroRollInput, 1);
     Serial.print(F(" P:"));
     Serial.print(gyroPitchInput, 1);
-    Serial.print(F(" Y:"));
-    Serial.print(gyroYawInput, 1);
     
+    // PID outputs
     Serial.print(F(" | PID R:"));
     Serial.print(pidRoll, 0);
     Serial.print(F(" P:"));
     Serial.print(pidPitch, 0);
-    Serial.print(F(" Y:"));
-    Serial.print(pidYaw, 0);
     
-    Serial.print(F(" | Motors FL:"));
+    // Motors
+    Serial.print(F(" | Mot FL:"));
     Serial.print(motorFLSpeed);
     Serial.print(F(" FR:"));
     Serial.print(motorFRSpeed);
@@ -661,8 +807,10 @@ void printDebugInfo() {
     Serial.print(F(" RL:"));
     Serial.print(motorRLSpeed);
     
-    Serial.print(F(" | RX T:"));
-    Serial.print(rxData.throttle);
+    // Buzzer status
+    if (buzzerActive) {
+      Serial.print(F(" | BUZZ:ON"));
+    }
     
     Serial.println();
     lastPrint = millis();

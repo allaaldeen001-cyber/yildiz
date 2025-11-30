@@ -118,11 +118,23 @@ void setup() {
   
   Serial.println(F("System Ready!"));
   Serial.println(F(""));
-  Serial.println(F("Controls:"));
-  Serial.println(F("  Left Stick: Throttle (V), Yaw (H)"));
-  Serial.println(F("  Right Stick: Pitch (V), Roll (H)"));
-  Serial.println(F("  SW1: Arm/Disarm"));
-  Serial.println(F("  SW2: Flight Mode"));
+  Serial.println(F("=== CONTROLS ==="));
+  Serial.println(F("Left Stick:"));
+  Serial.println(F("  Vertical   -> Throttle (altitude)"));
+  Serial.println(F("  Horizontal -> Yaw (rotate left/right)"));
+  Serial.println(F("Right Stick:"));
+  Serial.println(F("  Vertical   -> Pitch (forward/backward)"));
+  Serial.println(F("  Horizontal -> Roll (left/right)"));
+  Serial.println(F(""));
+  Serial.println(F("Switches:"));
+  Serial.println(F("  SW1 -> ARM/DISARM"));
+  Serial.println(F("  SW2 -> Flight Mode (ANGLE/ACRO)"));
+  Serial.println(F(""));
+  Serial.println(F("Buttons:"));
+  Serial.println(F("  BTN1 -> Calibration (recalibrate gyro)"));
+  Serial.println(F("  BTN2 -> Motor Test (hold to spin motors)"));
+  Serial.println(F("  BTN3 -> Buzzer Beep (find drone)"));
+  Serial.println(F("  BTN4 -> [Reserved]"));
   Serial.println(F(""));
 }
 
@@ -317,6 +329,7 @@ void printStatus() {
   static unsigned long lastPrintTime = 0;
   
   if (millis() - lastPrintTime > 200) {  // Print every 200ms
+    // Joystick values
     Serial.print(F("T:"));
     Serial.print(txData.throttle);
     Serial.print(F(" R:"));
@@ -325,21 +338,27 @@ void printStatus() {
     Serial.print(txData.pitch);
     Serial.print(F(" Y:"));
     Serial.print(txData.yaw);
-    Serial.print(F(" | SW:"));
-    Serial.print(txData.switches, BIN);
-    Serial.print(F(" BTN:"));
-    Serial.print(txData.buttons, BIN);
-    Serial.print(F(" | "));
     
+    // Switches
+    Serial.print(F(" | SW1:"));
+    Serial.print((txData.switches & 0x01) ? F("ARM") : F("SAFE"));
+    Serial.print(F(" SW2:"));
+    Serial.print((txData.switches & 0x02) ? F("ANGLE") : F("ACRO"));
+    
+    // Buttons (show which are pressed)
+    Serial.print(F(" | BTN:"));
+    if (txData.buttons & 0x01) Serial.print(F("CAL "));
+    if (txData.buttons & 0x02) Serial.print(F("TEST "));
+    if (txData.buttons & 0x04) Serial.print(F("BUZZ "));
+    if (txData.buttons & 0x08) Serial.print(F("4 "));
+    if (txData.buttons == 0) Serial.print(F("- "));
+    
+    // Connection status
+    Serial.print(F("| "));
     if (connected) {
-      Serial.print(F("CONN"));
-      if (txData.switches & 0x01) {
-        Serial.print(F(" [ARMED]"));
-      } else {
-        Serial.print(F(" [SAFE]"));
-      }
+      Serial.print(F("✓CONN"));
     } else {
-      Serial.print(F("NO SIGNAL"));
+      Serial.print(F("✗NO_SIG"));
     }
     
     Serial.println();
