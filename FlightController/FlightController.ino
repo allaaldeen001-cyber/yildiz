@@ -136,6 +136,7 @@ bool armed = false;
 bool calibrated = false;
 unsigned long lastReceiveTime = 0;
 unsigned long loopTimer;
+unsigned long lastDebugTime = 0;
 
 // ============================================
 // SETUP
@@ -211,6 +212,9 @@ void loop() {
   
   // Status indicators
   updateStatusLED();
+  
+  // Debug output (every 100ms)
+  printDebugInfo();
   
   // Maintain loop rate (250Hz)
   while (micros() - loopTimer < MAIN_LOOP_TIME);
@@ -385,14 +389,18 @@ void calculateAngles() {
   float accelRoll = atan2(accelY, accelZ) * 57.2958;  // Convert to degrees
   float accelPitch = atan2(-accelX, sqrt(accelY * accelY + accelZ * accelZ)) * 57.2958;
   
-  // Integrate gyro
-  angleRoll += gyroRollInput * 0.004;  // 4ms loop time
+  // Integrate gyro (4ms loop time = 0.004 seconds)
+  angleRoll += gyroRollInput * 0.004;
   anglePitch += gyroPitchInput * 0.004;
   angleYaw += gyroYawInput * 0.004;
   
   // Apply complementary filter (98% gyro, 2% accel)
   angleRoll = angleRoll * 0.98 + accelRoll * 0.02;
   anglePitch = anglePitch * 0.98 + accelPitch * 0.02;
+  
+  // Keep yaw within -180 to +180
+  if (angleYaw > 180) angleYaw -= 360;
+  if (angleYaw < -180) angleYaw += 360;
 }
 
 // ============================================
@@ -438,10 +446,23 @@ void calculatePID() {
 void mixMotors() {
   int throttle = rxData.throttle;
   
+  // Ensure minimum throttle for stabilization to work
+  // If throttle is too low, set to minimum hover threshold
+  if (throttle < 1100) {
+    throttle = 1100;  // Minimum for stabilization testing
+  }
+  
   // Quadcopter X configuration
+  // Front Left (CCW): -Pitch +Roll -Yaw
   motorFLSpeed = throttle - pidPitch + pidRoll - pidYaw;
+  
+  // Front Right (CW): -Pitch -Roll +Yaw
   motorFRSpeed = throttle - pidPitch - pidRoll + pidYaw;
+  
+  // Rear Right (CCW): +Pitch -Roll -Yaw
   motorRRSpeed = throttle + pidPitch - pidRoll - pidYaw;
+  
+  // Rear Left (CW): +Pitch +Roll +Yaw
   motorRLSpeed = throttle + pidPitch + pidRoll + pidYaw;
   
   // Constrain motor speeds
@@ -497,6 +518,16 @@ void receiveRadioData() {
     uint8_t calcChecksum = (rxData.throttle + rxData.roll + rxData.pitch + rxData.yaw) & 0xFF;
     if (calcChecksum == rxData.checksum) {
       lastReceiveTime = millis();
+    }
+  } else {
+    // If no data received yet, initialize with safe values
+    if (lastReceiveTime == 0) {
+      rxData.throttle = 1000;
+      rxData.roll = 0;
+      rxData.pitch = 0;
+      rxData.yaw = 0;
+      rxData.switches = 0;
+      rxData.buttons = 0;
     }
   }
 }
@@ -588,5 +619,52 @@ void errorBlink(int code) {
       delay(200);
     }
     delay(1000);
+  }
+}
+
+// ============================================
+// DEBUG OUTPUT
+// ============================================
+void printDebugInfo() {
+  static unsigned long lastPrint = 0;
+  
+  if (millis() - lastPrint > 100) {  // Print every 100ms
+    Serial.print(F("ARM:"));
+    Serial.print(armed ? 1 : 0);
+    Serial.print(F(" | Angles R:"));
+    Serial.print(angleRoll, 1);
+    Serial.print(F(" P:"));
+    Serial.print(anglePitch, 1);
+    Serial.print(F(" Y:"));
+    Serial.print(angleYaw, 1);
+    
+    Serial.print(F(" | Gyro R:"));
+    Serial.print(gyroRollInput, 1);
+    Serial.print(F(" P:"));
+    Serial.print(gyroPitchInput, 1);
+    Serial.print(F(" Y:"));
+    Serial.print(gyroYawInput, 1);
+    
+    Serial.print(F(" | PID R:"));
+    Serial.print(pidRoll, 0);
+    Serial.print(F(" P:"));
+    Serial.print(pidPitch, 0);
+    Serial.print(F(" Y:"));
+    Serial.print(pidYaw, 0);
+    
+    Serial.print(F(" | Motors FL:"));
+    Serial.print(motorFLSpeed);
+    Serial.print(F(" FR:"));
+    Serial.print(motorFRSpeed);
+    Serial.print(F(" RR:"));
+    Serial.print(motorRRSpeed);
+    Serial.print(F(" RL:"));
+    Serial.print(motorRLSpeed);
+    
+    Serial.print(F(" | RX T:"));
+    Serial.print(rxData.throttle);
+    
+    Serial.println();
+    lastPrint = millis();
   }
 }

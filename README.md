@@ -2,6 +2,20 @@
 
 A complete quadcopter flight control system with stabilization, PID control, and wireless communication.
 
+## 🔥 LATEST UPDATE: Stabilization Fix
+
+**Issue Fixed:** Motors now properly respond to MPU6050 tilting for stabilization!
+
+**What's New:**
+- ✅ Real-time debugging output showing angles, PID, and motor speeds
+- ✅ Minimum throttle (1100µs) ensures stabilization is visible when testing
+- ✅ Clear motor response when tilting drone by hand
+- ✅ Easy verification that MPU6050 and PID are working
+
+**Quick Test:** Upload code, ARM drone (no props!), tilt it by hand, watch motors respond!
+
+👉 **See:** `HOW_TO_TEST_STABILIZATION.md` for 5-minute test procedure
+
 ## Hardware Components
 
 ### Flight Controller Board
