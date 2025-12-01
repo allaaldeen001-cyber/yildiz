@@ -10,7 +10,7 @@
  * - ESC/Motors: FL:D3, FR:D5, RR:D6, RL:D9
  * 
  * Author: Professional Quadcopter System
- * Version: 2.0
+ * Version: 2.2 - IMPROVED STABILIZATION
  */
 
 #include <Wire.h>
@@ -58,20 +58,21 @@
 #define MODE_ACRO 3       // Manual / Rate mode
 #define MODE_MOTOR_TEST 4 // Motor test mode
 
-// PID Configuration
-#define PID_ROLL_KP 1.4
-#define PID_ROLL_KI 0.05
-#define PID_ROLL_KD 18.0
+// PID Configuration - TUNED FOR STABILITY
+// These gains work with the improved PID algorithm!
+#define PID_ROLL_KP 1.3      // Proportional: How hard to correct
+#define PID_ROLL_KI 0.03     // Integral: Eliminate steady-state error
+#define PID_ROLL_KD 15.0     // Derivative: Dampen oscillations
 
-#define PID_PITCH_KP 1.4
-#define PID_PITCH_KI 0.05
-#define PID_PITCH_KD 18.0
+#define PID_PITCH_KP 1.3     // Match roll for symmetric behavior
+#define PID_PITCH_KI 0.03
+#define PID_PITCH_KD 15.0
 
-#define PID_YAW_KP 3.0
+#define PID_YAW_KP 3.0       // Yaw needs higher P
 #define PID_YAW_KI 0.02
-#define PID_YAW_KD 0.0
+#define PID_YAW_KD 0.0       // No D term for yaw
 
-#define PID_LIMIT 400.0
+#define PID_LIMIT 400.0      // Maximum PID output
 
 // Loop timing
 #define MAIN_LOOP_TIME 4000  // 4ms = 250Hz
@@ -164,8 +165,8 @@ void setup() {
   digitalWrite(LED_PIN, LOW);
   
   Serial.println(F("================================="));
-  Serial.println(F("Quadcopter Flight Controller v2.1"));
-  Serial.println(F("With MPU6050 Stabilization"));
+  Serial.println(F("Quadcopter Flight Controller v2.2"));
+  Serial.println(F("IMPROVED STABILIZATION"));
   Serial.println(F("================================="));
   Serial.println(F(""));
   Serial.println(F("Button Functions from RC:"));
@@ -414,18 +415,28 @@ void readIMU() {
 // CALCULATE ANGLES
 // ============================================
 void calculateAngles() {
-  // Complementary filter
+  // Calculate angles from accelerometer
   float accelRoll = atan2(accelY, accelZ) * 57.2958;  // Convert to degrees
   float accelPitch = atan2(-accelX, sqrt(accelY * accelY + accelZ * accelZ)) * 57.2958;
   
-  // Integrate gyro (4ms loop time = 0.004 seconds)
-  angleRoll += gyroRollInput * 0.004;
-  anglePitch += gyroPitchInput * 0.004;
-  angleYaw += gyroYawInput * 0.004;
+  // Simplified complementary filter (stronger accel trust for better stability)
+  // This is what made TestStabilization work better!
+  if (angleRoll == 0 && anglePitch == 0) {
+    // First reading, initialize with accel
+    angleRoll = accelRoll;
+    anglePitch = accelPitch;
+  } else {
+    // Integrate gyro (4ms loop time = 0.004 seconds)
+    angleRoll += gyroRollInput * 0.004;
+    anglePitch += gyroPitchInput * 0.004;
+    
+    // Apply complementary filter (95% gyro, 5% accel for stronger correction)
+    angleRoll = angleRoll * 0.95 + accelRoll * 0.05;
+    anglePitch = anglePitch * 0.95 + accelPitch * 0.05;
+  }
   
-  // Apply complementary filter (98% gyro, 2% accel)
-  angleRoll = angleRoll * 0.98 + accelRoll * 0.02;
-  anglePitch = anglePitch * 0.98 + accelPitch * 0.02;
+  // Yaw tracking (gyro only)
+  angleYaw += gyroYawInput * 0.004;
   
   // Keep yaw within -180 to +180
   if (angleYaw > 180) angleYaw -= 360;
@@ -449,7 +460,9 @@ void calculatePID() {
     pidYawSetpoint = rxData.yaw / 2.0;
   }
   
-  // Roll PID
+  // ========================================
+  // ROLL PID - IMPROVED METHOD
+  // ========================================
   float rollError;
   if (flightMode == MODE_ANGLE) {
     // Angle mode: Error is angle difference
@@ -458,14 +471,31 @@ void calculatePID() {
     // Acro mode: Error is rate difference
     rollError = pidRollSetpoint - gyroRollInput;
   }
+  
+  // Integral term (anti-windup)
   pidRollI += PID_ROLL_KI * rollError;
-  pidRollI = constrain(pidRollI, -PID_LIMIT, PID_LIMIT);
-  pidRollD = PID_ROLL_KD * (rollError - pidRollPrev);
-  pidRoll = PID_ROLL_KP * rollError + pidRollI + pidRollD;
+  pidRollI = constrain(pidRollI, -PID_LIMIT / 2, PID_LIMIT / 2);
+  
+  // Derivative term - IMPROVED: use gyro rate directly for smoother response
+  // This is what TestStabilization did that worked better!
+  float rollDerivative;
+  if (flightMode == MODE_ANGLE) {
+    // In angle mode, D term fights rotation (use negative gyro rate)
+    rollDerivative = -gyroRollInput;
+  } else {
+    // In acro mode, D term dampens error change
+    rollDerivative = rollError - pidRollPrev;
+  }
+  pidRollD = PID_ROLL_KD * rollDerivative;
+  
+  // Combine PID terms
+  pidRoll = (PID_ROLL_KP * rollError) + pidRollI + pidRollD;
   pidRoll = constrain(pidRoll, -PID_LIMIT, PID_LIMIT);
   pidRollPrev = rollError;
   
-  // Pitch PID
+  // ========================================
+  // PITCH PID - IMPROVED METHOD
+  // ========================================
   float pitchError;
   if (flightMode == MODE_ANGLE) {
     // Angle mode: Error is angle difference
@@ -474,19 +504,38 @@ void calculatePID() {
     // Acro mode: Error is rate difference
     pitchError = pidPitchSetpoint - gyroPitchInput;
   }
+  
+  // Integral term (anti-windup)
   pidPitchI += PID_PITCH_KI * pitchError;
-  pidPitchI = constrain(pidPitchI, -PID_LIMIT, PID_LIMIT);
-  pidPitchD = PID_PITCH_KD * (pitchError - pidPitchPrev);
-  pidPitch = PID_PITCH_KP * pitchError + pidPitchI + pidPitchD;
+  pidPitchI = constrain(pidPitchI, -PID_LIMIT / 2, PID_LIMIT / 2);
+  
+  // Derivative term - IMPROVED: use gyro rate directly
+  float pitchDerivative;
+  if (flightMode == MODE_ANGLE) {
+    // In angle mode, D term fights rotation (use negative gyro rate)
+    pitchDerivative = -gyroPitchInput;
+  } else {
+    // In acro mode, D term dampens error change
+    pitchDerivative = pitchError - pidPitchPrev;
+  }
+  pidPitchD = PID_PITCH_KD * pitchDerivative;
+  
+  // Combine PID terms
+  pidPitch = (PID_PITCH_KP * pitchError) + pidPitchI + pidPitchD;
   pidPitch = constrain(pidPitch, -PID_LIMIT, PID_LIMIT);
   pidPitchPrev = pitchError;
   
-  // Yaw PID (rate control)
+  // ========================================
+  // YAW PID (Rate control only)
+  // ========================================
   float yawError = pidYawSetpoint - gyroYawInput;
+  
   pidYawI += PID_YAW_KI * yawError;
-  pidYawI = constrain(pidYawI, -PID_LIMIT, PID_LIMIT);
+  pidYawI = constrain(pidYawI, -PID_LIMIT / 2, PID_LIMIT / 2);
+  
   pidYawD = PID_YAW_KD * (yawError - pidYawPrev);
-  pidYaw = PID_YAW_KP * yawError + pidYawI + pidYawD;
+  
+  pidYaw = (PID_YAW_KP * yawError) + pidYawI + pidYawD;
   pidYaw = constrain(pidYaw, -PID_LIMIT, PID_LIMIT);
   pidYawPrev = yawError;
 }
