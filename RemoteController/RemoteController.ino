@@ -175,10 +175,22 @@ void setup() {
   }
   
   Serial.println(F("Radio initialized!"));
+  
+  // Optimal radio configuration for reliability
   radio.openWritingPipe(address);
-  radio.setPALevel(RF24_PA_HIGH);     // Maximum power for range
-  radio.setDataRate(RF24_250KBPS);    // Lower rate = better range
+  radio.setPALevel(RF24_PA_MAX);       // Maximum power for range
+  radio.setDataRate(RF24_250KBPS);     // Slowest = most reliable
+  radio.setChannel(108);               // Same channel as receiver
+  radio.setRetries(15, 15);            // Max retries (15x250μs delay, 15 retries)
+  radio.setCRCLength(RF24_CRC_16);     // 16-bit CRC for error detection
+  radio.setAutoAck(true);              // Enable auto-acknowledgment
   radio.stopListening();               // Transmitter mode
+  
+  Serial.println(F("Radio configuration optimized!"));
+  Serial.println(F("If transmission fails:"));
+  Serial.println(F("  1. Check 10uF capacitor on nRF24"));
+  Serial.println(F("  2. Reduce distance"));
+  Serial.println(F("  3. Check 3.3V power supply"));
   
   // Calibrate joystick center positions
   calibrateJoysticks();
@@ -361,15 +373,53 @@ void transmitData() {
   // Send data packet
   bool success = radio.write(&txData, sizeof(RadioData));
   
-  // Optional: Track transmission success
+  // Track transmission success/failure
   static unsigned long failCount = 0;
   static unsigned long successCount = 0;
+  static unsigned long lastFailReport = 0;
   
   if (success) {
     successCount++;
+    // Reset fail count on success
+    if (failCount > 0) {
+      failCount = 0; // Connection restored
+    }
   } else {
     failCount++;
-    Serial.println(F("Transmission failed!"));
+    
+    // Report transmission failures (but not too frequently)
+    if (millis() - lastFailReport > 5000) { // Every 5 seconds
+      Serial.print(F("⚠️  Transmission issues: "));
+      Serial.print(failCount);
+      Serial.println(F(" recent fails"));
+      Serial.println(F("Tips: 1) Check capacitor, 2) Reduce distance, 3) Remove obstacles"));
+      lastFailReport = millis();
+    }
+  }
+  
+  // Report statistics periodically
+  static unsigned long lastStatsReport = 0;
+  if (millis() - lastStatsReport > 30000) { // Every 30 seconds
+    unsigned long total = successCount + failCount;
+    if (total > 0) {
+      float successRate = (successCount * 100.0) / total;
+      Serial.print(F("📡 Link quality: "));
+      Serial.print(successRate, 1);
+      Serial.print(F("% ("));
+      Serial.print(successCount);
+      Serial.print(F(" success, "));
+      Serial.print(failCount);
+      Serial.println(F(" fails)"));
+      
+      if (successRate < 90.0) {
+        Serial.println(F("⚠️  Poor link quality! Check:"));
+        Serial.println(F("   - 10uF capacitor on nRF24"));
+        Serial.println(F("   - 3.3V power stable"));
+        Serial.println(F("   - Distance < 50m"));
+        Serial.println(F("   - No metal obstacles"));
+      }
+    }
+    lastStatsReport = millis();
   }
   
   // Reset one-shot commands after transmission

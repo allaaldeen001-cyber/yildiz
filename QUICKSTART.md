@@ -28,7 +28,7 @@ Get your quadcopter drone flying in 30 minutes! ⚡
 MPU6050:  SDA→A4, SCL→A5, VCC→3.3V, GND→GND
 MS5611:   SDA→A4, SCL→A5, VCC→3.3V, GND→GND (share with MPU)
 nRF24:    CE→D4, CSN→D10, MOSI→D11, MISO→D12, SCK→D13, VCC→3.3V
-          + 10µF capacitor on VCC/GND!
+          ⚠️ CRITICAL: 10µF capacitor on VCC/GND (prevents transmission fails!)
 Motors:   ESC signals → D3, D5, D6, D9
           ESC grounds → Arduino GND (all)
           ONE ESC BEC → Arduino VIN
@@ -43,7 +43,7 @@ Joysticks: VCC→5V, GND→GND
 Buttons:   D4-D7 to GND (4 buttons)
 Switches:  D2-D3 to GND (2 switches)
 nRF24:     CE→D9, CSN→D10, MOSI→D11, MISO→D12, SCK→D13, VCC→3.3V
-           + 10µF capacitor!
+           ⚠️ CRITICAL: 10µF capacitor on VCC/GND (prevents transmission fails!)
 ```
 
 ---
@@ -116,7 +116,9 @@ If wrong: Swap ANY 2 motor wires
 | Motors won't spin | Check ESC calibration, battery voltage |
 | Flips on takeoff | Check motor directions, propeller installation |
 | Won't arm | Throttle must be at minimum, calibrate first |
-| Radio not working | Check nRF24 power (3.3V), add capacitor |
+| "Transmission failed" | ADD 10µF CAPACITOR on nRF24! Check 3.3V power |
+| Radio not working | Check nRF24 power (3.3V), wiring, capacitor |
+| Buzzer too loud | Already fixed! Uses tone() - adjust frequency if needed |
 | Sensor errors | Check I2C wiring (A4, A5), use short wires |
 | Oscillates | Reduce PID P gains (Kp_roll = 1.0) |
 

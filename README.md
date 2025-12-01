@@ -69,6 +69,10 @@ nRF24L01+ Radio (SPI):
   D13 ── SCK
   3.3V ── VCC (IMPORTANT: Use 3.3V!)
   GND ── GND
+  
+  ⚠️ CRITICAL: Add 10µF capacitor between VCC and GND!
+             (Soldered directly to nRF24 pins)
+             This prevents "Transmission failed" errors!
 
 Status Indicators:
   D7 ── Buzzer (+)
@@ -109,6 +113,10 @@ nRF24L01+ Radio (SPI):
   D13 ── SCK
   3.3V ── VCC (IMPORTANT: Use 3.3V!)
   GND ── GND
+  
+  ⚠️ CRITICAL: Add 10µF capacitor between VCC and GND!
+             (Soldered directly to nRF24 pins)
+             This prevents "Transmission failed" errors!
 
 Power:
   VIN ── 9V Battery (+)

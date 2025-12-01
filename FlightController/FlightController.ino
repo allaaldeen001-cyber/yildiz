@@ -79,6 +79,16 @@ struct RadioData {
 RadioData receivedData;
 unsigned long lastRadioTime = 0;
 const unsigned long RADIO_TIMEOUT = 1000; // 1 second failsafe
+unsigned long radioFailCount = 0;
+
+// ========================================
+// BUZZER CONFIGURATION
+// ========================================
+bool buzzerEnabled = true;        // Set to false to disable buzzer
+const int BEEP_FREQUENCY = 2000;  // 2kHz - less annoying than digitalWrite
+const int BEEP_SHORT = 50;        // Short beep duration (ms)
+const int BEEP_MEDIUM = 100;      // Medium beep duration (ms)
+const int BEEP_LONG = 200;        // Long beep duration (ms)
 
 // ========================================
 // IMU VARIABLES
@@ -203,13 +213,13 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   
-  // Startup sequence: LED on, buzzer beep
+  // Startup sequence: LED on, pleasant startup sound
   digitalWrite(LED_PIN, HIGH);
-  beep(100);
-  delay(200);
-  beep(100);
-  delay(200);
-  beep(100);
+  beepTone(BEEP_SHORT);
+  delay(150);
+  beepTone(BEEP_SHORT);
+  delay(150);
+  beepTone(BEEP_SHORT);
   
   // Initialize I2C
   Wire.begin();
@@ -219,7 +229,7 @@ void setup() {
   Serial.println(F("Initializing MPU6050..."));
   if (mpu.begin()) {
     Serial.println(F("MPU6050 connected!"));
-    beep(50);
+    beepTone(BEEP_SHORT);
   } else {
     Serial.println(F("MPU6050 connection failed!"));
     errorBlink();
@@ -234,9 +244,12 @@ void setup() {
   Serial.println(F("Initializing MS5611..."));
   if (ms5611.begin()) {
     Serial.println(F("MS5611 connected!"));
-    beep(50);
+    beepTone(BEEP_SHORT);
   } else {
     Serial.println(F("MS5611 connection failed!"));
+    beepTone(BEEP_MEDIUM);
+    delay(100);
+    beepTone(BEEP_MEDIUM);
     // Continue anyway - altitude not critical
   }
   
@@ -244,13 +257,22 @@ void setup() {
   Serial.println(F("Initializing nRF24L01+..."));
   if (radio.begin()) {
     Serial.println(F("Radio initialized!"));
+    
+    // Optimal radio configuration for reliability
     radio.openReadingPipe(1, address);
-    radio.setPALevel(RF24_PA_HIGH);
-    radio.setDataRate(RF24_250KBPS);
+    radio.setPALevel(RF24_PA_MAX);           // Maximum power
+    radio.setDataRate(RF24_250KBPS);         // Slowest = most reliable
+    radio.setChannel(108);                   // Channel 108 (less WiFi interference)
+    radio.setRetries(15, 15);                // Max retries for reliability
+    radio.setCRCLength(RF24_CRC_16);         // 16-bit CRC for error detection
+    radio.setAutoAck(true);                  // Enable auto-acknowledgment
     radio.startListening();
-    beep(50);
+    
+    beepTone(BEEP_SHORT);
+    Serial.println(F("Radio configuration optimized!"));
   } else {
     Serial.println(F("Radio initialization failed!"));
+    Serial.println(F("Check: 1) 3.3V power, 2) 10uF capacitor, 3) Wiring"));
     errorBlink();
   }
   
@@ -331,15 +353,20 @@ void loop() {
 // ========================================
 void readRadio() {
   if (radio.available()) {
+    // Read incoming data
     radio.read(&receivedData, sizeof(RadioData));
     lastRadioTime = millis();
+    radioFailCount = 0; // Reset fail counter on successful read
     
     // Update flight state from radio
     angleMode = receivedData.angleMode;
     
-  } else if (millis() - lastRadioTime > RADIO_TIMEOUT) {
-    // FAILSAFE: Radio signal lost
-    failsafe();
+  } else {
+    // Check for timeout
+    if (millis() - lastRadioTime > RADIO_TIMEOUT) {
+      // FAILSAFE: Radio signal lost
+      failsafe();
+    }
   }
 }
 
@@ -348,11 +375,13 @@ void failsafe() {
   armed = false;
   setAllMotors(MOTOR_MIN);
   
-  // Alert with buzzer
+  // Alert with buzzer (quieter, less frequent)
   static unsigned long lastBeep = 0;
-  if (millis() - lastBeep > 500) {
-    beep(100);
+  if (millis() - lastBeep > 1000) {  // Once per second instead of twice
+    beepTone(BEEP_SHORT);             // Short beep instead of long
     lastBeep = millis();
+    
+    Serial.println(F("FAILSAFE: Signal lost!"));
   }
   
   digitalWrite(LED_PIN, (millis() / 200) % 2); // Fast blink
@@ -377,14 +406,21 @@ void processCommands() {
     // Check throttle is low before arming
     if (receivedData.throttle < 100) {
       armed = true;
-      beep(200); // Long beep for armed
+      beepTone(BEEP_LONG); // Long beep for armed
       digitalWrite(LED_PIN, HIGH);
       Serial.println(F("ARMED"));
+    } else {
+      // Throttle too high - warning beeps
+      beepTone(BEEP_SHORT);
+      delay(100);
+      beepTone(BEEP_SHORT);
+      Serial.println(F("Cannot ARM: Lower throttle first!"));
     }
   } else if (!receivedData.armed && armed) {
     armed = false;
-    beep(50); // Short beep for disarmed
-    beep(50);
+    beepTone(BEEP_SHORT); // Short beeps for disarmed
+    delay(100);
+    beepTone(BEEP_SHORT);
     digitalWrite(LED_PIN, LOW);
     Serial.println(F("DISARMED"));
   }
@@ -402,7 +438,7 @@ void calibrateSensors() {
   Serial.println(F("=== CALIBRATING SENSORS ==="));
   Serial.println(F("Keep drone still on flat surface!"));
   
-  beep(100);
+  beepTone(BEEP_MEDIUM);
   delay(500);
   
   // Blink during calibration
@@ -452,9 +488,10 @@ void calibrateSensors() {
   Serial.print(gyroYOffset); Serial.print(", ");
   Serial.println(gyroZOffset);
   
-  beep(50);
+  // Success sound
+  beepTone(BEEP_SHORT);
   delay(100);
-  beep(50);
+  beepTone(BEEP_SHORT);
   
   digitalWrite(LED_PIN, HIGH);
 }
@@ -637,7 +674,7 @@ void mixMotors() {
   if (abs(roll) > 45 || abs(pitch) > 45) {
     armed = false;
     Serial.println(F("EMERGENCY DISARM: Extreme tilt!"));
-    beep(200);
+    beepTone(BEEP_LONG);
   }
 }
 
@@ -668,7 +705,7 @@ void motorTest() {
   
   armed = false; // Safety
   
-  beep(100);
+  beepTone(BEEP_LONG);
   delay(1000);
   
   // Test each motor individually
@@ -696,8 +733,9 @@ void motorTest() {
   escRL.writeMicroseconds(1000);
   
   Serial.println(F("Motor test complete!"));
-  beep(50);
-  beep(50);
+  beepTone(BEEP_SHORT);
+  delay(100);
+  beepTone(BEEP_SHORT);
 }
 
 void softLanding() {
@@ -728,9 +766,9 @@ void softLanding() {
   setAllMotors(MOTOR_MIN);
   
   Serial.println(F("Landed."));
-  beep(50);
+  beepTone(BEEP_SHORT);
   delay(100);
-  beep(50);
+  beepTone(BEEP_SHORT);
 }
 
 // ========================================
@@ -771,10 +809,19 @@ void updateStatus() {
 // ========================================
 // HELPER FUNCTIONS
 // ========================================
-void beep(int duration) {
-  digitalWrite(BUZZER_PIN, HIGH);
+
+// Buzzer control with tone (much quieter and more pleasant)
+void beepTone(int duration) {
+  if (!buzzerEnabled) return; // Skip if buzzer disabled
+  
+  tone(BUZZER_PIN, BEEP_FREQUENCY, duration);
   delay(duration);
-  digitalWrite(BUZZER_PIN, LOW);
+  noTone(BUZZER_PIN);
+}
+
+// Old beep function (kept for compatibility)
+void beep(int duration) {
+  beepTone(duration);
 }
 
 void blinkPattern(int times, int duration) {
@@ -790,10 +837,10 @@ void errorBlink() {
   // Continuous error indication
   while (true) {
     digitalWrite(LED_PIN, HIGH);
-    beep(100);
-    delay(200);
+    beepTone(BEEP_MEDIUM);
+    delay(400);
     digitalWrite(LED_PIN, LOW);
-    delay(200);
+    delay(400);
   }
 }
 
