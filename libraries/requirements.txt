@@ -43,23 +43,30 @@ RF24 by TMRh20
 # GitHub: https://github.com/nRF24/RF24
 # License: GPL v2
 
-I2Cdev by jrowberg
-# Description: I2C device library (helper for MPU6050)
-# Used for: Simplified I2C communication
-# Version: Latest
-# Install from: Library Manager or GitHub
-# GitHub: https://github.com/jrowberg/i2cdevlib
-# License: MIT
-# Note: Search for "I2Cdev" in Library Manager
-
-MPU6050 by jrowberg
+Adafruit MPU6050 by Adafruit
 # Description: MPU6050 IMU library
 # Used for: Reading gyroscope and accelerometer data
+# Version: 2.2.4 or later
+# Install from: Library Manager
+# GitHub: https://github.com/adafruit/Adafruit_MPU6050
+# License: BSD
+# Note: Will also install dependencies (Adafruit Sensor, Adafruit BusIO)
+
+Adafruit Unified Sensor by Adafruit
+# Description: Unified sensor library (required by Adafruit MPU6050)
+# Used for: Standard sensor data structure
 # Version: Latest
-# Install from: Library Manager or GitHub
-# GitHub: https://github.com/jrowberg/i2cdevlib/tree/master/Arduino/MPU6050
+# Install from: Library Manager (auto-installed with Adafruit MPU6050)
+# GitHub: https://github.com/adafruit/Adafruit_Sensor
+# License: Apache 2.0
+
+Adafruit BusIO by Adafruit
+# Description: I2C/SPI abstraction library
+# Used for: Communication with sensors
+# Version: Latest
+# Install from: Library Manager (auto-installed with Adafruit MPU6050)
+# GitHub: https://github.com/adafruit/Adafruit_BusIO
 # License: MIT
-# Note: Requires I2Cdev library (install I2Cdev first)
 
 MS5611 by Rob Tillaart
 # Description: MS5611 barometric pressure sensor library
@@ -73,15 +80,14 @@ MS5611 by Rob Tillaart
 # ALTERNATIVE LIBRARIES (Optional)
 # ============================================================
 
-# If you have trouble with the MPU6050 library above, try:
+# If you have trouble with the Adafruit MPU6050 library, try:
 # MPU6050_tockn by tockn
 # Simpler interface, may be easier for beginners
 # Install from: Library Manager
+# Note: Requires different code structure
 
-# If you have trouble with the MS5611 library above, try:
-# Adafruit MS5611 Library
-# Well-documented alternative
-# Install from: Library Manager
+# Note: MS5611 by Rob Tillaart is the recommended library
+# It's well-maintained and feature-rich
 
 # ============================================================
 # INSTALLATION METHODS
@@ -157,12 +163,12 @@ MS5611 by Rob Tillaart
 # └─ Servo (built-in)
 # └─ SPI (built-in)
 # └─ RF24
-# └─ I2Cdev
-#    └─ Wire
-# └─ MPU6050
-#    └─ I2Cdev
-#    └─ Wire
-# └─ MS5611
+# └─ Adafruit MPU6050
+#    └─ Adafruit Unified Sensor
+#    └─ Adafruit BusIO
+#       └─ Wire
+#       └─ SPI
+# └─ MS5611 (by Rob Tillaart)
 #    └─ Wire
 
 # Remote Controller Dependencies:
@@ -203,10 +209,11 @@ MS5611 by Rob Tillaart
 #    The RF24 library works out of the box for Arduino Nano
 #    No special configuration needed
 
-# 2. MPU6050 Library Notes:
-#    Uses DMP (Digital Motion Processor) features if needed
-#    Current project uses raw data for simplicity
-#    Can be upgraded to use DMP for better performance
+# 2. Adafruit MPU6050 Library Notes:
+#    Automatically installs required dependencies
+#    Returns sensor data in standard SI units
+#    Easy-to-use API with sensor events
+#    Well-documented with examples
 
 # 3. MS5611 Library Notes:
 #    Set resolution in code: MS5611_ULTRA_HIGH_RES
@@ -225,9 +232,8 @@ MS5611 by Rob Tillaart
 
 # ☐ Install Arduino IDE (if not already installed)
 # ☐ Install RF24 library
-# ☐ Install I2Cdev library
-# ☐ Install MPU6050 library
-# ☐ Install MS5611 library
+# ☐ Install Adafruit MPU6050 library (will auto-install dependencies)
+# ☐ Install MS5611 library by Rob Tillaart
 # ☐ Open FlightController.ino
 # ☐ Select Board: Tools → Board → Arduino Nano
 # ☐ Select Processor: Tools → Processor → ATmega328P (Old Bootloader)

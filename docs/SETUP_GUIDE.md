@@ -81,14 +81,13 @@ Search and install each:
    → Click "Install"
    → Wait for completion
 
-2. I2Cdev by jrowberg
+2. Adafruit MPU6050 by Adafruit
    → Click "Install"
+   → Will automatically install dependencies:
+     - Adafruit Unified Sensor
+     - Adafruit BusIO
    
-3. MPU6050 by jrowberg
-   → Click "Install"
-   → (Requires I2Cdev - install that first if asked)
-   
-4. MS5611 by Rob Tillaart
+3. MS5611 by Rob Tillaart
    → Click "Install"
 ```
 
@@ -98,8 +97,9 @@ Sketch → Include Library
 
 You should see under "Contributed libraries":
 ✓ RF24
-✓ I2Cdev
-✓ MPU6050
+✓ Adafruit MPU6050
+✓ Adafruit Unified Sensor
+✓ Adafruit BusIO
 ✓ MS5611
 ```
 

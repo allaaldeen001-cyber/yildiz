@@ -15,7 +15,8 @@ Get your quadcopter drone flying in 30 minutes! ⚡
 # Install Arduino IDE libraries:
 1. Open Arduino IDE
 2. Sketch → Include Library → Manage Libraries
-3. Install: RF24, I2Cdev, MPU6050, MS5611
+3. Install: RF24, Adafruit MPU6050, MS5611 (by Rob Tillaart)
+   Note: Adafruit MPU6050 will auto-install its dependencies
 ```
 
 ---

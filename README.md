@@ -412,7 +412,7 @@ Install the following:
 - **Wire** (built-in, for I2C)
 - **Servo** (built-in, for ESC control)
 - **RF24** by TMRh20 (for nRF24L01+)
-- **I2Cdev** and **MPU6050** by jrowberg
+- **Adafruit MPU6050** by Adafruit (will auto-install dependencies)
 - **MS5611** by Rob Tillaart
 
 ### 3. Upload Code

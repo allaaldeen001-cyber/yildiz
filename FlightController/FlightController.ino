@@ -25,8 +25,9 @@
 #include <Servo.h>          // ESC control (uses PWM like servos)
 #include <SPI.h>            // SPI for nRF24
 #include <RF24.h>           // nRF24L01+ radio
-#include <MPU6050.h>        // MPU6050 IMU library
-#include <MS5611.h>         // MS5611 barometer
+#include <Adafruit_MPU6050.h>  // Adafruit MPU6050 IMU library
+#include <Adafruit_Sensor.h>   // Required by Adafruit MPU6050
+#include <MS5611.h>         // MS5611 barometer by RobTillaart
 
 // ========================================
 // PIN DEFINITIONS
@@ -50,7 +51,7 @@
 // ========================================
 // HARDWARE OBJECTS
 // ========================================
-MPU6050 mpu;                // IMU sensor
+Adafruit_MPU6050 mpu;       // IMU sensor
 MS5611 ms5611;              // Barometer
 RF24 radio(CE_PIN, CSN_PIN); // Radio module
 
@@ -83,8 +84,7 @@ const unsigned long RADIO_TIMEOUT = 1000; // 1 second failsafe
 // IMU VARIABLES
 // ========================================
 // Raw sensor readings
-int16_t ax, ay, az;     // Accelerometer
-int16_t gx, gy, gz;     // Gyroscope
+sensors_event_t accel, gyro, temp;  // Adafruit sensor events
 
 // Processed angles (degrees)
 float roll = 0, pitch = 0, yaw = 0;
@@ -217,8 +217,7 @@ void setup() {
   
   // Initialize MPU6050
   Serial.println(F("Initializing MPU6050..."));
-  mpu.initialize();
-  if (mpu.testConnection()) {
+  if (mpu.begin()) {
     Serial.println(F("MPU6050 connected!"));
     beep(50);
   } else {
@@ -227,9 +226,9 @@ void setup() {
   }
   
   // Configure MPU6050
-  mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_500);  // ±500°/s
-  mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_4);  // ±4g
-  mpu.setDLPFMode(MPU6050_DLPF_BW_42);             // 42Hz low-pass filter
+  mpu.setGyroRange(MPU6050_RANGE_500_DEG);        // ±500°/s
+  mpu.setAccelerometerRange(MPU6050_RANGE_4_G);   // ±4g
+  mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);     // 21Hz low-pass filter
   
   // Initialize MS5611
   Serial.println(F("Initializing MS5611..."));
@@ -415,20 +414,20 @@ void calibrateSensors() {
   }
   
   // Collect samples
-  long gyroXSum = 0, gyroYSum = 0, gyroZSum = 0;
-  long accelXSum = 0, accelYSum = 0, accelZSum = 0;
+  float gyroXSum = 0, gyroYSum = 0, gyroZSum = 0;
+  float accelXSum = 0, accelYSum = 0, accelZSum = 0;
   const int samples = 1000;
   
   for (int i = 0; i < samples; i++) {
-    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+    mpu.getEvent(&accel, &gyro, &temp);
     
-    gyroXSum += gx;
-    gyroYSum += gy;
-    gyroZSum += gz;
+    gyroXSum += gyro.gyro.x;
+    gyroYSum += gyro.gyro.y;
+    gyroZSum += gyro.gyro.z;
     
-    accelXSum += ax;
-    accelYSum += ay;
-    accelZSum += az;
+    accelXSum += accel.acceleration.x;
+    accelYSum += accel.acceleration.y;
+    accelZSum += accel.acceleration.z;
     
     delay(3);
   }
@@ -440,7 +439,7 @@ void calibrateSensors() {
   
   accelXOffset = accelXSum / (float)samples;
   accelYOffset = accelYSum / (float)samples;
-  accelZOffset = (accelZSum / (float)samples) - 16384; // -1g on Z axis
+  accelZOffset = (accelZSum / (float)samples) - 9.81; // -1g on Z axis (m/s²)
   
   // Set base altitude
   baseAltitude = ms5611.getAltitude(ms5611.readPressure());
@@ -464,28 +463,19 @@ void calibrateSensors() {
 // SENSOR READING
 // ========================================
 void readSensors() {
-  // Read raw IMU data
-  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+  // Read IMU data using Adafruit library
+  mpu.getEvent(&accel, &gyro, &temp);
   
-  // Apply calibration offsets
-  gx -= gyroXOffset;
-  gy -= gyroYOffset;
-  gz -= gyroZOffset;
+  // Apply calibration offsets and convert to desired units
+  // Gyro data is already in rad/s, convert to degrees/s
+  rollRate = ((gyro.gyro.x - gyroXOffset) * 180.0 / PI);
+  pitchRate = ((gyro.gyro.y - gyroYOffset) * 180.0 / PI);
+  yawRate = ((gyro.gyro.z - gyroZOffset) * 180.0 / PI);
   
-  ax -= accelXOffset;
-  ay -= accelYOffset;
-  az -= accelZOffset;
-  
-  // Convert to meaningful units
-  // Gyro: LSB/°/s = 65.5 for ±500°/s range
-  rollRate = gx / 65.5;
-  pitchRate = gy / 65.5;
-  yawRate = gz / 65.5;
-  
-  // Accelerometer: LSB/g = 8192 for ±4g range
-  float accelX = ax / 8192.0;
-  float accelY = ay / 8192.0;
-  float accelZ = az / 8192.0;
+  // Accelerometer data is in m/s², convert to g
+  float accelX = (accel.acceleration.x - accelXOffset) / 9.81;
+  float accelY = (accel.acceleration.y - accelYOffset) / 9.81;
+  float accelZ = (accel.acceleration.z - accelZOffset) / 9.81;
 }
 
 // ========================================
@@ -493,8 +483,13 @@ void readSensors() {
 // ========================================
 void calculateAngles() {
   // Convert accelerometer readings to angles
-  float accelRoll = atan2(ay, az) * 180.0 / PI;
-  float accelPitch = atan2(-ax, sqrt(ay*ay + az*az)) * 180.0 / PI;
+  // Get calibrated values
+  float accelX = (accel.acceleration.x - accelXOffset) / 9.81;
+  float accelY = (accel.acceleration.y - accelYOffset) / 9.81;
+  float accelZ = (accel.acceleration.z - accelZOffset) / 9.81;
+  
+  float accelRoll = atan2(accelY, accelZ) * 180.0 / PI;
+  float accelPitch = atan2(-accelX, sqrt(accelY*accelY + accelZ*accelZ)) * 180.0 / PI;
   
   // Integrate gyro rates
   roll += rollRate * deltaTime;
