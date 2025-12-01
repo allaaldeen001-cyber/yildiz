@@ -1,0 +1,245 @@
+# Arduino Library Requirements for Quadcopter Drone Project
+# ============================================================
+#
+# Installation Instructions:
+# 1. Open Arduino IDE
+# 2. Go to Sketch → Include Library → Manage Libraries
+# 3. Search for each library name below
+# 4. Click "Install" for each one
+#
+# Note: Some libraries are built-in to Arduino IDE
+
+# ============================================================
+# CORE LIBRARIES (Built-in)
+# ============================================================
+
+Wire
+# Description: I2C communication library
+# Used for: MPU6050 and MS5611 sensor communication
+# Version: Built-in with Arduino IDE
+# No installation needed
+
+Servo
+# Description: PWM control library
+# Used for: ESC (motor) control
+# Version: Built-in with Arduino IDE
+# No installation needed
+
+SPI
+# Description: SPI communication library
+# Used for: nRF24L01+ radio module
+# Version: Built-in with Arduino IDE
+# No installation needed
+
+# ============================================================
+# EXTERNAL LIBRARIES (Must Install)
+# ============================================================
+
+RF24 by TMRh20
+# Description: nRF24L01+ radio communication library
+# Used for: Wireless remote control communication
+# Version: 1.4.7 or later
+# Install from: Library Manager
+# GitHub: https://github.com/nRF24/RF24
+# License: GPL v2
+
+Adafruit MPU6050 by Adafruit
+# Description: MPU6050 IMU library
+# Used for: Reading gyroscope and accelerometer data
+# Version: 2.2.4 or later
+# Install from: Library Manager
+# GitHub: https://github.com/adafruit/Adafruit_MPU6050
+# License: BSD
+# Note: Will also install dependencies (Adafruit Sensor, Adafruit BusIO)
+
+Adafruit Unified Sensor by Adafruit
+# Description: Unified sensor library (required by Adafruit MPU6050)
+# Used for: Standard sensor data structure
+# Version: Latest
+# Install from: Library Manager (auto-installed with Adafruit MPU6050)
+# GitHub: https://github.com/adafruit/Adafruit_Sensor
+# License: Apache 2.0
+
+Adafruit BusIO by Adafruit
+# Description: I2C/SPI abstraction library
+# Used for: Communication with sensors
+# Version: Latest
+# Install from: Library Manager (auto-installed with Adafruit MPU6050)
+# GitHub: https://github.com/adafruit/Adafruit_BusIO
+# License: MIT
+
+MS5611 by Rob Tillaart
+# Description: MS5611 barometric pressure sensor library
+# Used for: Altitude measurement
+# Version: 0.4.2 or later
+# Install from: Library Manager
+# GitHub: https://github.com/RobTillaart/MS5611
+# License: MIT
+
+# ============================================================
+# ALTERNATIVE LIBRARIES (Optional)
+# ============================================================
+
+# If you have trouble with the Adafruit MPU6050 library, try:
+# MPU6050_tockn by tockn
+# Simpler interface, may be easier for beginners
+# Install from: Library Manager
+# Note: Requires different code structure
+
+# Note: MS5611 by Rob Tillaart is the recommended library
+# It's well-maintained and feature-rich
+
+# ============================================================
+# INSTALLATION METHODS
+# ============================================================
+
+# Method 1: Arduino Library Manager (Recommended)
+# ------------------------------------------------
+# 1. Arduino IDE → Sketch → Include Library → Manage Libraries
+# 2. Search for library name
+# 3. Click Install
+# 4. Wait for installation to complete
+
+# Method 2: Manual Installation from GitHub
+# ------------------------------------------
+# 1. Download library ZIP from GitHub
+# 2. Arduino IDE → Sketch → Include Library → Add .ZIP Library
+# 3. Select downloaded ZIP file
+# 4. Restart Arduino IDE
+
+# Method 3: Manual Installation to Libraries Folder
+# --------------------------------------------------
+# 1. Download library from GitHub
+# 2. Extract to Arduino libraries folder:
+#    Windows: C:\Users\[username]\Documents\Arduino\libraries\
+#    Mac: ~/Documents/Arduino/libraries/
+#    Linux: ~/Arduino/libraries/
+# 3. Restart Arduino IDE
+
+# ============================================================
+# VERIFICATION
+# ============================================================
+
+# After installing all libraries, verify by:
+# 1. Arduino IDE → Sketch → Include Library
+# 2. You should see all libraries listed under "Contributed libraries"
+# 3. Try compiling the FlightController.ino sketch
+# 4. If compilation succeeds, all libraries are correctly installed
+
+# ============================================================
+# TROUBLESHOOTING
+# ============================================================
+
+# Problem: "Library not found" error
+# Solution: 
+# - Check library is installed in correct folder
+# - Restart Arduino IDE
+# - Reinstall library
+
+# Problem: "Multiple libraries found" warning
+# Solution:
+# - Remove duplicate library folders from libraries directory
+# - Keep only the latest version
+
+# Problem: Compilation errors with library code
+# Solution:
+# - Update to latest library version
+# - Check library compatibility with Arduino IDE version
+# - Try alternative library (see optional libraries above)
+
+# Problem: "Not enough memory" error
+# Solution:
+# - Some libraries use more memory than others
+# - Try alternative lightweight libraries
+# - Optimize code (remove debug Serial.print statements)
+# - Use F() macro for strings: Serial.println(F("Text"));
+
+# ============================================================
+# LIBRARY DEPENDENCY TREE
+# ============================================================
+
+# Flight Controller Dependencies:
+# └─ Wire (built-in)
+# └─ Servo (built-in)
+# └─ SPI (built-in)
+# └─ RF24
+# └─ Adafruit MPU6050
+#    └─ Adafruit Unified Sensor
+#    └─ Adafruit BusIO
+#       └─ Wire
+#       └─ SPI
+# └─ MS5611 (by Rob Tillaart)
+#    └─ Wire
+
+# Remote Controller Dependencies:
+# └─ SPI (built-in)
+# └─ RF24
+
+# ============================================================
+# MEMORY USAGE ESTIMATES
+# ============================================================
+
+# Flight Controller:
+# - Sketch: ~18 KB / 32 KB Flash (56%)
+# - Global variables: ~800 bytes / 2048 bytes RAM (40%)
+# - Safe margins for modifications
+
+# Remote Controller:
+# - Sketch: ~8 KB / 32 KB Flash (25%)
+# - Global variables: ~400 bytes / 2048 bytes RAM (20%)
+# - Plenty of room for features
+
+# ============================================================
+# VERSION COMPATIBILITY
+# ============================================================
+
+# Arduino IDE Version: 1.8.x or 2.x
+# Arduino Core: 1.8.5 or later
+# Board: Arduino AVR Boards (Nano, Uno, Mega compatible)
+
+# Tested Configurations:
+# ✓ Arduino IDE 1.8.19 + Arduino AVR Boards 1.8.5
+# ✓ Arduino IDE 2.2.1 + Arduino AVR Boards 1.8.6
+
+# ============================================================
+# ADDITIONAL NOTES
+# ============================================================
+
+# 1. RF24 Library Configuration:
+#    The RF24 library works out of the box for Arduino Nano
+#    No special configuration needed
+
+# 2. Adafruit MPU6050 Library Notes:
+#    Automatically installs required dependencies
+#    Returns sensor data in standard SI units
+#    Easy-to-use API with sensor events
+#    Well-documented with examples
+
+# 3. MS5611 Library Notes:
+#    Set resolution in code: MS5611_ULTRA_HIGH_RES
+#    Higher resolution = slower updates but more accurate
+
+# 4. Memory Optimization:
+#    If running low on memory:
+#    - Remove Serial.print() debug statements
+#    - Use F() macro for constant strings
+#    - Reduce buffer sizes
+#    - Consider using PROGMEM for constant data
+
+# ============================================================
+# QUICK START CHECKLIST
+# ============================================================
+
+# ☐ Install Arduino IDE (if not already installed)
+# ☐ Install RF24 library
+# ☐ Install Adafruit MPU6050 library (will auto-install dependencies)
+# ☐ Install MS5611 library by Rob Tillaart
+# ☐ Open FlightController.ino
+# ☐ Select Board: Tools → Board → Arduino Nano
+# ☐ Select Processor: Tools → Processor → ATmega328P (Old Bootloader)
+# ☐ Verify/Compile (check for errors)
+# ☐ If successful, ready to upload!
+
+# ============================================================
+# END OF REQUIREMENTS
+# ============================================================
