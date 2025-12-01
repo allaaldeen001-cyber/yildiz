@@ -147,6 +147,8 @@ bool motorTestActive = false;
 bool buzzerActive = false;
 unsigned long buzzerStartTime = 0;
 int motorTestSpeed = 1000;
+bool softLandingActive = false;
+unsigned long landingStartTime = 0;
 
 // ============================================
 // SETUP
@@ -162,8 +164,16 @@ void setup() {
   digitalWrite(LED_PIN, LOW);
   
   Serial.println(F("================================="));
-  Serial.println(F("Quadcopter Flight Controller v2.0"));
+  Serial.println(F("Quadcopter Flight Controller v2.1"));
+  Serial.println(F("With MPU6050 Stabilization"));
   Serial.println(F("================================="));
+  Serial.println(F(""));
+  Serial.println(F("Button Functions from RC:"));
+  Serial.println(F("  BTN1 (D4) - Calibrate sensors"));
+  Serial.println(F("  BTN2 (D5) - Motor test/direction check"));
+  Serial.println(F("  BTN3 (D6) - ARM for flight"));
+  Serial.println(F("  BTN4 (D7) - Soft landing mode"));
+  Serial.println(F(""));
   
   // Initialize motors
   initMotors();
@@ -577,22 +587,25 @@ void receiveRadioData() {
 // PROCESS BUTTONS
 // ============================================
 void processButtons() {
-  // Button 1: Calibration (press to recalibrate gyro)
+  // Button 1 (D4 on remote): CALIBRATION
+  // Press to trigger sensor calibration from remote control
   bool button1 = (rxData.buttons & 0x01);
   if (button1 && !lastButton1 && !armed) {
-    Serial.println(F("Button 1: Starting calibration..."));
+    Serial.println(F("BTN1: Starting sensor calibration from RC..."));
     beep(1, 200);
     calibrateSensors();
+    Serial.println(F("BTN1: Calibration complete!"));
   }
   lastButton1 = button1;
   
-  // Button 2: Motor Test Mode (hold to spin motors smoothly)
+  // Button 2 (D5 on remote): MOTOR TEST
+  // Hold to spin motors and check direction/operation
   bool button2 = (rxData.buttons & 0x02);
   if (button2 && !armed) {
     if (!motorTestActive) {
       motorTestActive = true;
       motorTestSpeed = 1000;
-      Serial.println(F("Button 2: Motor test START"));
+      Serial.println(F("BTN2: Motor test - CHECK DIRECTIONS!"));
       beep(1, 100);
     }
     // Gradually increase speed while held
@@ -604,25 +617,73 @@ void processButtons() {
       motorTestActive = false;
       motorTestSpeed = 1000;
       stopMotors();
-      Serial.println(F("Button 2: Motor test STOP"));
+      Serial.println(F("BTN2: Motor test STOP"));
       beep(1, 100);
     }
   }
   lastButton2 = button2;
   
-  // Button 3: Buzzer Beep (toggle buzzer for finding drone)
+  // Button 3 (D6 on remote): ARM FOR FLIGHT
+  // Press to make drone ready to fly (ARM)
   bool button3 = (rxData.buttons & 0x04);
   if (button3 && !lastButton3) {
-    buzzerActive = !buzzerActive;
-    if (buzzerActive) {
-      buzzerStartTime = millis();
-      Serial.println(F("Button 3: Buzzer ON (find mode)"));
-    } else {
+    if (!armed && rxData.throttle < 1050) {
+      // ARM the drone
+      armed = true;
+      buzzerActive = false;
       digitalWrite(BUZZER_PIN, LOW);
-      Serial.println(F("Button 3: Buzzer OFF"));
+      beep(1, 200);
+      Serial.println(F("BTN3: ARMED - Ready to fly! Use joysticks!"));
+      Serial.println(F("      MPU6050 stabilization ACTIVE"));
+    } else if (armed) {
+      // DISARM the drone
+      armed = false;
+      resetPID();
+      beep(2, 100);
+      Serial.println(F("BTN3: DISARMED - Safe"));
+    } else if (rxData.throttle >= 1050) {
+      Serial.println(F("BTN3: Cannot ARM - Throttle too high!"));
+      beep(3, 100);
     }
   }
   lastButton3 = button3;
+  
+  // Button 4 (D7 on remote): SOFT LANDING MODE
+  // Toggle soft landing (gradual throttle reduction)
+  bool button4 = (rxData.buttons & 0x08);
+  static bool lastButton4 = false;
+  static bool softLandingActive = false;
+  static unsigned long landingStartTime = 0;
+  
+  if (button4 && !lastButton4 && armed) {
+    softLandingActive = !softLandingActive;
+    if (softLandingActive) {
+      landingStartTime = millis();
+      Serial.println(F("BTN4: SOFT LANDING MODE - Throttle reducing slowly"));
+      beep(1, 150);
+    } else {
+      Serial.println(F("BTN4: Soft landing cancelled"));
+      beep(2, 100);
+    }
+  }
+  lastButton4 = button4;
+  
+  // Execute soft landing if active
+  if (softLandingActive && armed) {
+    unsigned long landingTime = millis() - landingStartTime;
+    // Reduce throttle over 5 seconds
+    if (landingTime < 5000) {
+      int reduction = map(landingTime, 0, 5000, 0, 300);
+      rxData.throttle = max(1000, rxData.throttle - reduction);
+    } else {
+      // After 5 seconds, auto-disarm
+      softLandingActive = false;
+      armed = false;
+      resetPID();
+      Serial.println(F("BTN4: Soft landing complete - DISARMED"));
+      beep(3, 100);
+    }
+  }
 }
 
 // ============================================
