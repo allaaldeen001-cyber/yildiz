@@ -1,0 +1,226 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     REQUIRED ARDUINO LIBRARIES                            ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+Install these libraries via Arduino IDE Library Manager:
+(Tools → Manage Libraries...)
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ FLIGHT CONTROLLER LIBRARIES                                               │
+└───────────────────────────────────────────────────────────────────────────┘
+
+1. Adafruit MPU6050
+   - Author: Adafruit
+   - Version: 2.2.4 or newer
+   - Purpose: MPU6050 gyroscope + accelerometer
+   - Installation: Search "Adafruit MPU6050" in Library Manager
+
+2. Adafruit Unified Sensor
+   - Author: Adafruit
+   - Version: 1.1.9 or newer
+   - Purpose: Required dependency for Adafruit sensors
+   - Installation: Search "Adafruit Unified Sensor" in Library Manager
+   - Note: Usually auto-installed with Adafruit MPU6050
+
+3. MS5611
+   - Author: Rob Tillaart
+   - Version: 0.3.9 or newer
+   - Purpose: MS5611 barometric pressure sensor (altitude)
+   - Installation: Search "MS5611 by Rob Tillaart" in Library Manager
+
+4. RF24
+   - Author: TMRh20
+   - Version: 1.4.5 or newer
+   - Purpose: nRF24L01+ radio communication
+   - Installation: Search "RF24 by TMRh20" in Library Manager
+
+5. Servo (Built-in)
+   - Author: Arduino
+   - Purpose: ESC control via PWM
+   - Installation: Included with Arduino IDE, no installation needed
+
+6. Wire (Built-in)
+   - Author: Arduino
+   - Purpose: I2C communication
+   - Installation: Included with Arduino IDE, no installation needed
+
+7. SPI (Built-in)
+   - Author: Arduino
+   - Purpose: SPI communication for nRF24L01+
+   - Installation: Included with Arduino IDE, no installation needed
+
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ REMOTE CONTROLLER LIBRARIES                                               │
+└───────────────────────────────────────────────────────────────────────────┘
+
+1. RF24
+   - Author: TMRh20
+   - Version: 1.4.5 or newer
+   - Purpose: nRF24L01+ radio communication
+   - Installation: Search "RF24 by TMRh20" in Library Manager
+
+2. SPI (Built-in)
+   - Author: Arduino
+   - Purpose: SPI communication for nRF24L01+
+   - Installation: Included with Arduino IDE, no installation needed
+
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     INSTALLATION INSTRUCTIONS                             ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+STEP 1: Open Arduino IDE Library Manager
+────────────────────────────────────────────────────────────────────────────
+  1. Open Arduino IDE (version 1.8.19 or newer)
+  2. Go to: Sketch → Include Library → Manage Libraries...
+  3. Wait for library index to update
+
+
+STEP 2: Install Each Library
+────────────────────────────────────────────────────────────────────────────
+  For each library above:
+  
+  1. Type library name in search box
+  2. Find the correct author (important!)
+  3. Click "Install"
+  4. Wait for installation to complete
+  5. Repeat for all libraries
+
+
+STEP 3: Verify Installation
+────────────────────────────────────────────────────────────────────────────
+  1. Go to: Sketch → Include Library
+  2. Scroll down to "Contributed libraries" section
+  3. Verify all libraries are listed:
+     - Adafruit MPU6050
+     - Adafruit Unified Sensor
+     - MS5611
+     - RF24
+
+
+STEP 4: Test Compilation (Flight Controller)
+────────────────────────────────────────────────────────────────────────────
+  1. Open: FlightController/FlightController.ino
+  2. Select board: Tools → Board → Arduino Nano
+  3. Select processor: Tools → Processor → ATmega328P (Old Bootloader)
+  4. Click "Verify" button (checkmark icon)
+  5. Wait for compilation to complete
+  6. If successful: "Done compiling" message appears
+  7. If errors: Check that all libraries are installed
+
+
+STEP 5: Test Compilation (Remote Controller)
+────────────────────────────────────────────────────────────────────────────
+  1. Open: RemoteController/RemoteController.ino
+  2. Same board/processor settings as above
+  3. Click "Verify" button
+  4. Should compile without errors
+
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     TROUBLESHOOTING                                       ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+ISSUE: "Library not found" error
+SOLUTION: 
+  - Ensure Library Manager index is updated (may take 1-2 minutes)
+  - Check internet connection
+  - Try restarting Arduino IDE
+  - Manually download from GitHub and install via ZIP:
+    * Sketch → Include Library → Add .ZIP Library...
+
+ISSUE: "Multiple libraries found" warning
+SOLUTION:
+  - This is usually safe to ignore
+  - Ensure you're using the correct version (by correct author)
+
+ISSUE: "Compilation error" with Adafruit libraries
+SOLUTION:
+  - Make sure "Adafruit Unified Sensor" is also installed
+  - Update to latest versions of both libraries
+
+ISSUE: "RF24.h not found"
+SOLUTION:
+  - Install "RF24" by TMRh20 (NOT "RF24Network" or other variants)
+  - If using ESP32/ESP8266, use different RF24 version
+
+ISSUE: Upload fails
+SOLUTION:
+  - Try different processor option:
+    * ATmega328P (Old Bootloader) - for most clones
+    * ATmega328P - for official Arduino Nano
+  - Check USB cable connection
+  - Verify correct COM port selected: Tools → Port
+
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     LIBRARY VERSIONS TESTED                               ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+This code was tested with:
+  - Adafruit MPU6050: v2.2.4
+  - Adafruit Unified Sensor: v1.1.9
+  - MS5611 by Rob Tillaart: v0.3.9
+  - RF24 by TMRh20: v1.4.5
+  - Arduino IDE: 1.8.19
+
+Later versions should also work, but if you encounter issues, try these
+specific versions.
+
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     ALTERNATIVE INSTALLATION (MANUAL)                     ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+If Library Manager fails, download manually:
+
+1. Adafruit MPU6050:
+   https://github.com/adafruit/Adafruit_MPU6050
+
+2. Adafruit Unified Sensor:
+   https://github.com/adafruit/Adafruit_Sensor
+
+3. MS5611:
+   https://github.com/RobTillaart/MS5611
+
+4. RF24:
+   https://github.com/nRF24/RF24
+
+Installation:
+  1. Download ZIP from GitHub (Code → Download ZIP)
+  2. In Arduino IDE: Sketch → Include Library → Add .ZIP Library...
+  3. Select downloaded ZIP file
+  4. Restart Arduino IDE
+
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     MEMORY USAGE NOTES                                    ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+Arduino Nano has limited memory:
+  - Flash Memory (Program): 30720 bytes (30KB)
+  - SRAM (Variables): 2048 bytes (2KB)
+
+Current usage (approximate):
+  - Flight Controller: ~28KB flash, ~1.4KB SRAM
+  - Remote Controller: ~12KB flash, ~800 bytes SRAM
+
+If you run out of memory:
+  - Reduce debug output (remove Serial.print statements)
+  - Reduce PID calculations (simplify algorithm)
+  - Use F() macro for strings: Serial.println(F("text"));
+
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     SUPPORT                                               ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+For library-specific issues, check documentation:
+  - Adafruit: https://learn.adafruit.com/
+  - MS5611: https://github.com/RobTillaart/MS5611
+  - RF24: https://nrf24.github.io/RF24/
+
+For general Arduino help:
+  - Arduino Forum: https://forum.arduino.cc/
+  - Arduino Reference: https://www.arduino.cc/reference/
