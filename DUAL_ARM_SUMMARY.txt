@@ -1,0 +1,360 @@
+================================================================================
+DUAL-ARM ROBOT SYSTEM - QUICK REFERENCE
+================================================================================
+
+TWO NEW SCRIPTS CREATED FOR DUAL-ARM/MULTI-MANIPULATOR SYSTEMS
+
+================================================================================
+1. EXAMPLE_DUAL_ARM_COLLABORATIVE.M (Pre-configured Demo)
+================================================================================
+
+PURPOSE:
+  Complete demonstration of 2 manipulators working together with a common load
+
+FEATURES:
+  ✓ 2 x 3-DOF RRR manipulators
+  ✓ Symmetric configuration (mirror setup)
+  ✓ 8-waypoint coordinated trajectory
+  ✓ Common load handling (2kg box)
+  ✓ Pick-and-place operation
+  ✓ Synchronized motion
+  ✓ 3D visualization with load
+  ✓ Complete data export
+
+HOW TO RUN:
+  >> example_dual_arm_collaborative
+
+WHAT IT DOES:
+  Phase 1: Home position (arms apart)
+  Phase 2: Approach load (moving together)
+  Phase 3: Grasp load (close together)
+  Phase 4: Lift load (synchronized)
+  Phase 5: Move to new position (coordinated)
+  Phase 6: Place load down (together)
+  Phase 7: Release (separate)
+  Phase 8: Return home
+
+ROBOT CONFIGURATION:
+  Robot 1 (Left):  Base at [-0.5, 0, 0]
+  Robot 2 (Right): Base at [0.5, 0, 0]
+  Links: 0.4m, 0.3m, 0.25m
+  Reach: ~0.95m each
+  Overlap: 0.9m shared workspace
+
+OUTPUTS:
+  - Robot trajectories (both robots)
+  - End-effector paths
+  - Load trajectory with grasp states
+  - Manipulability analysis
+  - H and Phi matrices for both
+  - Configuration file
+  - Complete MATLAB workspace
+
+================================================================================
+2. DUAL_ARM_SIMULATOR.M (Interactive Custom Setup)
+================================================================================
+
+PURPOSE:
+  Interactive configuration and simulation of 2 robots in shared workspace
+
+FEATURES:
+  ✓ User-configured robots (any DOF)
+  ✓ Mirror or independent setup
+  ✓ 4 task types to choose from
+  ✓ Automatic IK for assembly tasks
+  ✓ Synchronized trajectory generation
+  ✓ Real-time visualization
+  ✓ Complete data export
+
+HOW TO RUN:
+  >> dual_arm_simulator
+
+TASK TYPES:
+
+  1. COORDINATED MOTION
+     - Synchronized trajectories
+     - User defines start/end for both
+     - Harmonic trajectory
+     - Good for testing coordination
+
+  2. PICK AND PLACE
+     - Shared load handling
+     - Predefined approach-grasp-lift-place
+     - Cycloidal trajectory
+     - Simulates collaborative lifting
+
+  3. ASSEMBLY TASK
+     - Both robots meet at target point
+     - Uses IK to solve configurations
+     - Harmonic trajectory
+     - Good for precision tasks
+
+  4. CUSTOM WAYPOINTS
+     - User-defined motion
+     - Cubic polynomial trajectory
+     - Maximum flexibility
+
+USER INPUTS:
+  Robot 1:
+    - Number of joints
+    - Link vectors [x,y,z] for each
+    - Joint types (R/P) for each
+    - Joint axes [x,y,z] for each
+    - Base position [x,y,z]
+  
+  Robot 2:
+    - Mirror Robot 1? (y/n)
+    - If no: same inputs as Robot 1
+    - Base position [x,y,z]
+  
+  Task:
+    - Task type (1-4)
+    - Duration (seconds)
+    - Number of samples
+    - Configurations/targets (depends on task)
+
+OUTPUTS:
+  - Custom robot trajectories
+  - End-effector paths
+  - Joint plots
+  - Animation
+  - H and Phi matrices
+  - Complete data files
+
+================================================================================
+KEY CONCEPTS
+================================================================================
+
+SHARED WORKSPACE:
+  - Area where both robots can reach
+  - Requires coordination to avoid collision
+  - Optimal for collaborative tasks
+
+COMMON LOAD:
+  - Object grasped by both robots
+  - Load position = center of end-effectors
+  - Requires synchronized motion
+  - Forces distributed between robots
+
+COORDINATED MOTION:
+  - Both robots move simultaneously
+  - Same trajectory type and duration
+  - Synchronized waypoints
+  - Maintains relative positions
+
+SYMMETRIC CONFIGURATION:
+  - Robots are mirror images
+  - Simplifies planning
+  - Natural for load sharing
+  - Robot 2 axes often mirrored in X
+
+BASE POSITIONS:
+  - Critical for workspace overlap
+  - Face-to-face: good for passing objects
+  - Side-by-side: good for parallel work
+  - L-shaped: good for assembly
+
+================================================================================
+VISUALIZATION
+================================================================================
+
+COLOR CODING:
+  Blue   = Robot 1 (left/primary)
+  Red    = Robot 2 (right/secondary)
+  Green  = Common load / grasped region
+  Yellow = Target positions
+
+PLOTS CREATED:
+  1. Workspace view with trajectories
+  2. Joint angles over time (both robots)
+  3. Manipulability comparison
+  4. End-effector separation distance
+  5. Animated 3D motion
+
+ANIMATION FEATURES:
+  - Both robots shown simultaneously
+  - Load rendered as 3D box (when grasped)
+  - Connection lines from EE to load
+  - Trajectory traces
+  - Phase labels
+  - Coordinate frames
+
+================================================================================
+DATA EXPORT
+================================================================================
+
+For each simulation, exports to output/ folder:
+
+TRAJECTORIES:
+  dual_arm_robot1_trajectory.csv
+  dual_arm_robot2_trajectory.csv
+  
+END-EFFECTOR PATHS:
+  dual_arm_robot1_ee_positions.csv
+  dual_arm_robot2_ee_positions.csv
+  
+LOAD DATA:
+  dual_arm_load_trajectory.csv
+  (includes grasp state flags)
+  
+ANALYSIS:
+  dual_arm_manipulability.csv
+  (manipulability & condition numbers)
+  
+MATRICES:
+  dual_arm_robot1_H_joint*.csv
+  dual_arm_robot2_H_joint*.csv
+  dual_arm_robot1_Phi_joint*.csv
+  dual_arm_robot2_Phi_joint*.csv
+  
+CONFIGURATION:
+  dual_arm_configuration.txt
+  
+WORKSPACE:
+  dual_arm_complete_data.mat
+
+================================================================================
+QUICK START
+================================================================================
+
+EASIEST WAY (Pre-configured):
+  >> example_dual_arm_collaborative
+  
+  Watch the animation, see the plots, check output/ folder.
+  Duration: ~60 seconds
+
+CUSTOM SETUP (Interactive):
+  >> dual_arm_simulator
+  
+  Follow prompts:
+  1. Configure Robot 1 (number of joints, links, etc.)
+  2. Mirror or configure Robot 2
+  3. Choose task type
+  4. Set duration and samples
+  5. Enter start/end configurations
+  6. View results
+
+MINIMAL CUSTOM CODE:
+  See DUAL_ARM_GUIDE.md for code examples
+
+================================================================================
+COMMON APPLICATIONS
+================================================================================
+
+✓ Heavy object handling (load sharing)
+✓ Large part assembly (precision positioning)
+✓ Flexible manufacturing (parallel operations)
+✓ Surgical robotics (coordinated tools)
+✓ Warehouse automation (collaborative picking)
+✓ Research (multi-agent coordination)
+
+================================================================================
+DOCUMENTATION
+================================================================================
+
+DETAILED GUIDE:
+  DUAL_ARM_GUIDE.md - Complete guide with examples
+
+MAIN DOCS:
+  README.md - Full project documentation
+  QUICKSTART.md - Quick start guide
+  INDEX.md - File navigation
+
+================================================================================
+TIPS
+================================================================================
+
+1. START SIMPLE
+   - Begin with example_dual_arm_collaborative
+   - Understand the workflow
+   - Then try custom configurations
+
+2. BASE POSITIONING
+   - Place bases 1-1.5m apart
+   - Ensure workspace overlap
+   - Consider task requirements
+
+3. TRAJECTORY PLANNING
+   - Use same trajectory type for both
+   - Same duration and samples
+   - Coordinate waypoint timing
+
+4. LOAD HANDLING
+   - Keep load between end-effectors
+   - Maintain stable grasp distance
+   - Avoid sudden motions
+
+5. PERFORMANCE
+   - Start with few samples (50-100)
+   - Increase for smoother motion
+   - Animation frame skip for speed
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+PROBLEM: Robots appear to collide
+SOLUTION: Increase base separation or adjust waypoints
+
+PROBLEM: Load doesn't follow smoothly
+SOLUTION: Check grasp state tracking and EE calculations
+
+PROBLEM: IK doesn't converge for assembly task
+SOLUTION: Ensure target is in both workspaces, try different initial guesses
+
+PROBLEM: Animation is slow
+SOLUTION: Reduce number of samples or increase frame skip
+
+PROBLEM: Uncoordinated motion
+SOLUTION: Verify same trajectory type and timing
+
+================================================================================
+COMPARISON TABLE
+================================================================================
+
+Feature                    | Pre-configured | Interactive
+---------------------------|----------------|------------------
+Setup time                 | 0 min          | 5-10 min
+Customization              | Limited        | Full
+Task types                 | 1              | 4
+DOF supported              | 3+3            | Any + Any
+IK solving                 | No             | Yes (assembly)
+Best for                   | Demo/learning  | Research/custom
+
+================================================================================
+EXAMPLE COMPARISON
+================================================================================
+
+SINGLE ROBOT (example_3dof_robot.m):
+  - 1 robot
+  - 3 DOF
+  - Simple trajectory
+  - ~30 seconds
+
+DUAL-ARM (example_dual_arm_collaborative.m):
+  - 2 robots
+  - 3+3 DOF
+  - Coordinated motion + load
+  - ~60 seconds
+
+CUSTOM DUAL-ARM (dual_arm_simulator.m):
+  - 2 robots
+  - User-defined DOF
+  - Multiple task types
+  - Variable duration
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+1. Run: example_dual_arm_collaborative
+2. Read: DUAL_ARM_GUIDE.md
+3. Try: dual_arm_simulator with different tasks
+4. Modify: Example code for your application
+5. Extend: Add collision detection, force control, etc.
+
+================================================================================
+
+Ready? Run:  >> example_dual_arm_collaborative
+
+================================================================================
