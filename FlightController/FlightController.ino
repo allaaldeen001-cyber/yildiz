@@ -80,25 +80,34 @@ struct RadioPacket {
 // ═══════════════════════════════════════════════════════════════════════════
 
 // RATE PID (Inner Loop) - Fast, responsive
+// Optimized for 250mm frame with 2000-2200Kv motors
+struct {
+  float Kp = 0.65;   // Proportional gain (reduced for stability)
+  float Ki = 0.35;   // Integral gain (drift correction)
+  float Kd = 0.018;  // Derivative gain (damping)
+  float maxI = 150;  // Anti-windup limit
+} pidRateRoll, pidRatePitch;
+
+// YAW Rate PID (typically less aggressive)
 struct {
   float Kp = 0.8;    // Proportional gain
-  float Ki = 0.4;    // Integral gain  
-  float Kd = 0.015;  // Derivative gain
+  float Ki = 0.3;    // Integral gain
+  float Kd = 0.005;  // Derivative gain (less damping for yaw)
   float maxI = 100;  // Anti-windup limit
-} pidRateRoll, pidRatePitch, pidRateYaw;
+} pidRateYaw;
 
 // ANGLE PID (Outer Loop) - Slow, stable
 struct {
-  float Kp = 3.5;    // Proportional gain
+  float Kp = 4.0;    // Proportional gain (quick return to level)
   float Ki = 0.0;    // Integral gain (usually 0)
   float Kd = 0.0;    // Derivative gain (usually 0)
 } pidAngleRoll, pidAnglePitch;
 
-// ALTITUDE PID
+// ALTITUDE PID (optimized for MS5611)
 struct {
-  float Kp = 5.0;    // Proportional gain
-  float Ki = 0.2;    // Integral gain
-  float Kd = 3.0;    // Derivative gain (velocity damping)
+  float Kp = 4.5;    // Proportional gain
+  float Ki = 0.15;   // Integral gain (slow accumulation)
+  float Kd = 3.5;    // Derivative gain (velocity damping)
   float maxI = 200;  // Anti-windup limit
 } pidAltitude;
 
@@ -300,16 +309,43 @@ void initMotors() {
 void initRadio() {
   if (!radio.begin()) {
     Serial.println(F("❌ Radio initialization FAILED!"));
+    Serial.println(F("   Check: VCC=3.3V, 10µF capacitor, wiring"));
     while (1) { beep(5); delay(1000); }
   }
   
+  // OPTIMIZED SETTINGS FOR DRONE CONTROL
   radio.openReadingPipe(1, radioAddress);
+  
+  // Power: MAX for best range (adjust if interference)
   radio.setPALevel(RF24_PA_MAX);
+  
+  // Data rate: 250kbps = longest range, most reliable
   radio.setDataRate(RF24_250KBPS);
+  
+  // Channel: 108 (away from WiFi 2.4GHz channels)
   radio.setChannel(108);
+  
+  // Auto-ACK: ENABLED (ensures packet delivery)
+  radio.setAutoAck(true);
+  
+  // Retry settings: 15 retries, 1500µs delay (optimized for 250kbps)
+  radio.setRetries(5, 15);  // 5*250µs=1250µs delay, 15 retries
+  
+  // Payload size: Fixed for speed (sizeof RadioPacket)
+  radio.setPayloadSize(sizeof(RadioPacket));
+  
+  // CRC: 2 bytes for reliability
+  radio.setCRCLength(RF24_CRC_16);
+  
+  // Dynamic payloads: DISABLED for speed
+  radio.disableDynamicPayloads();
+  
+  // Start listening
   radio.startListening();
   
-  Serial.println(F("✅ Radio initialized (2.4GHz, 250kbps)"));
+  Serial.println(F("✅ Radio initialized (2.4GHz, 250kbps, ACK ON)"));
+  Serial.print(F("   Listening on pipe 1, address: 0x"));
+  Serial.println((unsigned long)radioAddress, HEX);
 }
 
 void initMPU6050() {
@@ -403,19 +439,43 @@ void calibrateAltitude() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void readRadio() {
+  // Check if data available
   if (radio.available()) {
-    radio.read(&rcData, sizeof(RadioPacket));
-    lastRadioTime = currentTime;
-    radioConnected = true;
+    // Read packet
+    bool success = radio.read(&rcData, sizeof(RadioPacket));
+    
+    if (success) {
+      lastRadioTime = currentTime;
+      radioConnected = true;
+      
+      // Optional: Send ACK payload (telemetry back to RC)
+      // Uncomment if you want bidirectional communication
+      /*
+      struct TelemetryPacket {
+        float batteryVoltage;
+        float altitude;
+        uint8_t armed;
+      } telemetry;
+      
+      telemetry.batteryVoltage = 11.1; // Read from analog pin
+      telemetry.altitude = currentAltitude;
+      telemetry.armed = armed;
+      
+      radio.writeAckPayload(1, &telemetry, sizeof(TelemetryPacket));
+      */
+    }
   } else {
     // Failsafe: No signal for 1 second
     if (currentTime - lastRadioTime > 1000) {
       if (radioConnected) {
         Serial.println(F("⚠️  FAILSAFE: Radio signal lost!"));
+        Serial.println(F("   Auto-disarming for safety"));
         beep(5);
       }
       radioConnected = false;
       armed = false;
+      
+      // Safe values
       rcData.throttle = 0;
       rcData.roll = 0;
       rcData.pitch = 0;
@@ -696,16 +756,28 @@ void calculatePID() {
   // STEP 4: MOTOR MIXING (X-configuration)
   // ═══════════════════════════════════════════════════════════════════════
   
+  // Standard X-configuration mixing
   motorFL_speed = baseThrottle - pidPitch + pidRoll - pidYaw;
   motorFR_speed = baseThrottle - pidPitch - pidRoll + pidYaw;
   motorRR_speed = baseThrottle + pidPitch - pidRoll - pidYaw;
   motorRL_speed = baseThrottle + pidPitch + pidRoll + pidYaw;
   
-  // Constrain motor outputs
+  // Constrain to safe range
   motorFL_speed = constrain(motorFL_speed, 1000, 2000);
   motorFR_speed = constrain(motorFR_speed, 1000, 2000);
   motorRR_speed = constrain(motorRR_speed, 1000, 2000);
   motorRL_speed = constrain(motorRL_speed, 1000, 2000);
+  
+  // Airmode: Keep minimum throttle when armed (prevents motor cutoff during flips)
+  // Uncomment for advanced flying (ACRO mode)
+  /*
+  if (armed && baseThrottle > 1050) {
+    motorFL_speed = max(motorFL_speed, 1050);
+    motorFR_speed = max(motorFR_speed, 1050);
+    motorRR_speed = max(motorRR_speed, 1050);
+    motorRL_speed = max(motorRL_speed, 1050);
+  }
+  */
 }
 
 // Generic PID calculation function
@@ -755,15 +827,22 @@ void resetPID() {
 
 void updateMotors() {
   if (armed && rcData.throttle > 50) {
+    // Write calculated speeds
     motorFL.writeMicroseconds(motorFL_speed);
     motorFR.writeMicroseconds(motorFR_speed);
     motorRR.writeMicroseconds(motorRR_speed);
     motorRL.writeMicroseconds(motorRL_speed);
   } else {
+    // Disarmed or throttle too low: motors off
     motorFL.writeMicroseconds(1000);
     motorFR.writeMicroseconds(1000);
     motorRR.writeMicroseconds(1000);
     motorRL.writeMicroseconds(1000);
+    
+    // Reset integrators when disarmed
+    if (!armed) {
+      resetPID();
+    }
   }
 }
 

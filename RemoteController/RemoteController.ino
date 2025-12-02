@@ -163,16 +163,49 @@ void loop() {
 void initRadio() {
   if (!radio.begin()) {
     Serial.println(F("❌ Radio initialization FAILED!"));
+    Serial.println(F("   Check: VCC=3.3V, 10µF capacitor, wiring"));
+    Serial.println(F("   CE=D9, CSN=D10, MOSI=D11, MISO=D12, SCK=D13"));
     while (1) { delay(1000); }
   }
   
+  // OPTIMIZED SETTINGS FOR DRONE CONTROL
   radio.openWritingPipe(radioAddress);
+  radio.openReadingPipe(1, radioAddress);  // For ACK payloads
+  
+  // Power: MAX for best range
   radio.setPALevel(RF24_PA_MAX);
+  
+  // Data rate: 250kbps = longest range, most reliable
   radio.setDataRate(RF24_250KBPS);
+  
+  // Channel: 108 (same as FC)
   radio.setChannel(108);
+  
+  // Auto-ACK: ENABLED (wait for acknowledgment)
+  radio.setAutoAck(true);
+  
+  // Retry settings: Aggressive retries for critical control data
+  radio.setRetries(5, 15);  // 5*250µs delay, 15 retries
+  
+  // Payload size: Fixed for speed
+  radio.setPayloadSize(sizeof(RadioPacket));
+  
+  // CRC: 2 bytes for reliability
+  radio.setCRCLength(RF24_CRC_16);
+  
+  // Dynamic payloads: DISABLED for speed
+  radio.disableDynamicPayloads();
+  
+  // ACK payloads: ENABLED (receive telemetry from FC)
+  radio.enableAckPayload();
+  
+  // TX mode
   radio.stopListening();
   
-  Serial.println(F("✅ Radio initialized (2.4GHz, 250kbps)"));
+  Serial.println(F("✅ Radio initialized (2.4GHz, 250kbps, ACK ON)"));
+  Serial.print(F("   Writing to address: 0x"));
+  Serial.println((unsigned long)radioAddress, HEX);
+  Serial.println(F("   Waiting for ACK from Flight Controller..."));
 }
 
 void calibrateJoysticks() {
@@ -259,15 +292,50 @@ void readButtons() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void transmitData() {
+  // Send packet and wait for ACK
   bool success = radio.write(&txData, sizeof(RadioPacket));
   
   if (success) {
     radioOK = true;
     lastSuccessfulSend = currentTime;
+    
+    // Optional: Read telemetry from ACK payload
+    if (radio.isAckPayloadAvailable()) {
+      // Uncomment if FC is sending telemetry
+      /*
+      struct TelemetryPacket {
+        float batteryVoltage;
+        float altitude;
+        uint8_t armed;
+      } telemetry;
+      
+      radio.read(&telemetry, sizeof(TelemetryPacket));
+      
+      // Display telemetry
+      Serial.print(F(" | Batt:"));
+      Serial.print(telemetry.batteryVoltage, 1);
+      Serial.print(F("V | Alt:"));
+      Serial.print(telemetry.altitude, 0);
+      Serial.print(F("cm"));
+      */
+    }
   } else {
-    // Check if connection lost
+    // Transmission failed
+    // Check if connection lost for >500ms
     if (currentTime - lastSuccessfulSend > 500) {
       radioOK = false;
+      
+      // Warning every 2 seconds
+      static unsigned long lastWarning = 0;
+      if (currentTime - lastWarning > 2000) {
+        Serial.println();
+        Serial.println(F("⚠️  WARNING: No ACK from Flight Controller!"));
+        Serial.println(F("   1. Check FC is powered on"));
+        Serial.println(F("   2. Check distance (move closer)"));
+        Serial.println(F("   3. Check nRF24 antennas are parallel"));
+        Serial.println(F("   4. Check 10µF capacitor on both modules"));
+        lastWarning = currentTime;
+      }
     }
   }
 }
