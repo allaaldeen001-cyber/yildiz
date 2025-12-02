@@ -26,6 +26,7 @@
 
 #include <Wire.h>
 #include <SPI.h>
+#include <nRF24L01.h>
 #include <RF24.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
@@ -313,34 +314,15 @@ void initRadio() {
     while (1) { beep(5); delay(1000); }
   }
   
-  // OPTIMIZED SETTINGS FOR DRONE CONTROL
-  radio.openReadingPipe(1, radioAddress);
-  
-  // Power: MAX for best range (adjust if interference)
-  radio.setPALevel(RF24_PA_MAX);
-  
-  // Data rate: 250kbps = longest range, most reliable
-  radio.setDataRate(RF24_250KBPS);
-  
-  // Channel: 108 (away from WiFi 2.4GHz channels)
+  // Use settings that WORK (from your test code)
   radio.setChannel(108);
-  
-  // Auto-ACK: ENABLED (ensures packet delivery)
+  radio.setDataRate(RF24_250KBPS);
+  radio.setPALevel(RF24_PA_MAX);
   radio.setAutoAck(true);
+  radio.enableAckPayload();
+  radio.enableDynamicPayloads();  // This is what your working code uses!
   
-  // Retry settings: 15 retries, 1500µs delay (optimized for 250kbps)
-  radio.setRetries(5, 15);  // 5*250µs=1250µs delay, 15 retries
-  
-  // Payload size: Fixed for speed (sizeof RadioPacket)
-  radio.setPayloadSize(sizeof(RadioPacket));
-  
-  // CRC: 2 bytes for reliability
-  radio.setCRCLength(RF24_CRC_16);
-  
-  // Dynamic payloads: DISABLED for speed
-  radio.disableDynamicPayloads();
-  
-  // Start listening
+  radio.openReadingPipe(1, radioAddress);
   radio.startListening();
   
   Serial.println(F("✅ Radio initialized (2.4GHz, 250kbps, ACK ON)"));

@@ -27,6 +27,7 @@
  */
 
 #include <SPI.h>
+#include <nRF24L01.h>
 #include <RF24.h>
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -168,38 +169,16 @@ void initRadio() {
     while (1) { delay(1000); }
   }
   
-  // OPTIMIZED SETTINGS FOR DRONE CONTROL
-  radio.openWritingPipe(radioAddress);
-  radio.openReadingPipe(1, radioAddress);  // For ACK payloads
-  
-  // Power: MAX for best range
-  radio.setPALevel(RF24_PA_MAX);
-  
-  // Data rate: 250kbps = longest range, most reliable
-  radio.setDataRate(RF24_250KBPS);
-  
-  // Channel: 108 (same as FC)
+  // Use settings that WORK (from your test code)
   radio.setChannel(108);
-  
-  // Auto-ACK: ENABLED (wait for acknowledgment)
+  radio.setDataRate(RF24_250KBPS);
+  radio.setPALevel(RF24_PA_MAX);
   radio.setAutoAck(true);
-  
-  // Retry settings: Aggressive retries for critical control data
-  radio.setRetries(5, 15);  // 5*250µs delay, 15 retries
-  
-  // Payload size: Fixed for speed
-  radio.setPayloadSize(sizeof(RadioPacket));
-  
-  // CRC: 2 bytes for reliability
-  radio.setCRCLength(RF24_CRC_16);
-  
-  // Dynamic payloads: DISABLED for speed
-  radio.disableDynamicPayloads();
-  
-  // ACK payloads: ENABLED (receive telemetry from FC)
   radio.enableAckPayload();
+  radio.enableDynamicPayloads();  // This is what your working code uses!
   
-  // TX mode
+  radio.openWritingPipe(radioAddress);
+  radio.openReadingPipe(1, radioAddress);
   radio.stopListening();
   
   Serial.println(F("✅ Radio initialized (2.4GHz, 250kbps, ACK ON)"));
