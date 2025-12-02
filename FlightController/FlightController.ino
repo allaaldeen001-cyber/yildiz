@@ -128,7 +128,7 @@
 #define LANDING_DESCENT_RATE_MAX    50.0f   // cm/s maximum descent
 #define LANDING_TOUCHDOWN_ALTITUDE  15.0f   // cm - considered on ground
 #define LANDING_IDLE_THROTTLE       1100    // µs - minimum thrust maintaining control
-#define LANDING_SAFE_IDLE           1050    // µs - after touchdown
+#define LANDING_SAFE_IDLE_THROTTLE  1050    // µs - after touchdown (renamed to avoid enum conflict)
 #define LANDING_MAX_TILT            15.0f   // degrees - max tilt during landing
 #define LANDING_VELOCITY_THRESHOLD  10.0f   // cm/s - velocity for touchdown confirmation
 
@@ -1094,7 +1094,7 @@ void mixMotors() {
         
       case LANDING_TOUCHDOWN:
         // Just touched down, reduce to safe idle
-        applyMinimumThrottle(LANDING_SAFE_IDLE);
+        applyMinimumThrottle(LANDING_SAFE_IDLE_THROTTLE);
         break;
         
       case LANDING_SAFE_IDLE:
