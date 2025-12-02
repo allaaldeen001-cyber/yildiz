@@ -9,7 +9,7 @@ classdef Collaborative_DualArm_Functions
         %  MAIN COLLABORATIVE ANALYSIS
         %  ===================================================================
         
-        function results = analyze_collaborative_system(robot1, robot2, load_params, task_params)
+        function results = analyze_multi_robot_system(robot1, robot2, load_params, task_params)
             % Main function for collaborative dual-arm system
             %
             % INPUTS:
