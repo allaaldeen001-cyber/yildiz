@@ -154,8 +154,8 @@ create_plots = true;
 % Export data to files (true/false)
 export_data = true;
 
-% Create animation (true/false) - WARNING: Can be slow!
-create_animation = false;
+% Create animation (true/false) - Shows robots with links moving
+create_animation = true;
 
 fprintf('  ✓ Output: plots=%s, export=%s, animate=%s\n\n', ...
         string(create_plots), string(export_data), string(create_animation));

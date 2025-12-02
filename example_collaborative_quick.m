@@ -132,10 +132,24 @@ try
     end
     
     %% Create Visualizations
-    fprintf('Creating visualizations...\n');
+    fprintf('Creating visualizations...\n\n');
     
-    % Figure 1: Workspace with load
-    figure('Name', 'Collaborative Workspace', 'Position', [50, 50, 1200, 800]);
+    % Use the built-in visualization
+    Collaborative_DualArm_Functions.visualize_collaborative_system(...
+        results, robot1, robot2, load_params);
+    
+    fprintf('✓ All visualizations created\n\n');
+    
+    %% Create Animation
+    fprintf('Creating animation...\n');
+    Collaborative_DualArm_Functions.animate_collaborative_motion(...
+        results, robot1, robot2, load_params);
+    
+    %% Additional Workspace Figure
+    fprintf('Creating detailed workspace view...\n');
+    
+    % Figure: Detailed workspace with robot configurations
+    figure('Name', 'Collaborative Workspace - Detailed', 'Position', [50, 50, 1200, 800]);
     
     % Robot 1 path
     plot3(results.robot1.ee_position(1,:), results.robot1.ee_position(2,:), ...

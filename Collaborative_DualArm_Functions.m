@@ -543,16 +543,16 @@ classdef Collaborative_DualArm_Functions
         
         function plot_workspace(results, robot1, robot2, load_params)
             % Plot workspace with both robots and load
-            figure('Name', 'Collaborative Workspace', 'Position', [50, 50, 1200, 800]);
+            figure('Name', 'Collaborative Workspace with Robot Configurations', 'Position', [50, 50, 1400, 900]);
             
             % Robot 1 path
             plot3(results.robot1.ee_position(1,:), results.robot1.ee_position(2,:), ...
-                  results.robot1.ee_position(3,:), 'b-', 'LineWidth', 2);
+                  results.robot1.ee_position(3,:), 'b--', 'LineWidth', 1.5);
             hold on;
             
             % Robot 2 path
             plot3(results.robot2.ee_position(1,:), results.robot2.ee_position(2,:), ...
-                  results.robot2.ee_position(3,:), 'r-', 'LineWidth', 2);
+                  results.robot2.ee_position(3,:), 'r--', 'LineWidth', 1.5);
             
             % Load trajectory (when grasped)
             grasped_idx = find(results.grasp_states);
@@ -563,20 +563,43 @@ classdef Collaborative_DualArm_Functions
                       'g-', 'LineWidth', 3);
             end
             
+            % Show robot configurations at key points (initial, mid, final)
+            n_samples = size(results.robot1.ee_position, 2);
+            key_indices = [1, round(n_samples/2), n_samples];
+            alphas = [0.4, 0.6, 0.8];
+            
+            for idx = 1:length(key_indices)
+                k = key_indices(idx);
+                alpha = alphas(idx);
+                
+                % Robot 1
+                Collaborative_DualArm_Functions.draw_robot_links(...
+                    results.robot1.q_trajectory(:, k), robot1, 'b', alpha, 3);
+                
+                % Robot 2
+                Collaborative_DualArm_Functions.draw_robot_links(...
+                    results.robot2.q_trajectory(:, k), robot2, 'r', alpha, 3);
+                
+                % Load if grasped
+                if results.grasp_states(k)
+                    draw_load_box(results.load.position(:, k), load_params, alpha);
+                end
+            end
+            
             % Bases
             scatter3(robot1.base_position(1), robot1.base_position(2), robot1.base_position(3), ...
-                     200, 'b', 'filled', 'MarkerEdgeColor', 'k');
+                     300, 'b', 'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 2);
             scatter3(robot2.base_position(1), robot2.base_position(2), robot2.base_position(3), ...
-                     200, 'r', 'filled', 'MarkerEdgeColor', 'k');
+                     300, 'r', 'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 2);
             
             grid on;
-            xlabel('X (m)');
-            ylabel('Y (m)');
-            zlabel('Z (m)');
-            title('Collaborative Dual-Arm System - Workspace');
-            legend('Robot 1 Path', 'Robot 2 Path', 'Load Path', 'Robot 1 Base', 'Robot 2 Base');
+            xlabel('X (m)', 'FontSize', 12, 'FontWeight', 'bold');
+            ylabel('Y (m)', 'FontSize', 12, 'FontWeight', 'bold');
+            zlabel('Z (m)', 'FontSize', 12, 'FontWeight', 'bold');
+            title('Collaborative Workspace - Trajectories and Configurations', 'FontSize', 14, 'FontWeight', 'bold');
+            legend('Robot 1 Path', 'Robot 2 Path', 'Load Path', 'Location', 'best');
             axis equal;
-            view(3);
+            view(45, 25);
             hold off;
         end
         
@@ -679,52 +702,98 @@ classdef Collaborative_DualArm_Functions
         %  ===================================================================
         
         function animate_collaborative_motion(results, robot1, robot2, load_params)
-            % Animate collaborative motion
+            % Animate collaborative motion with full robot visualization
             fprintf('--- Starting Animation ---\n');
+            fprintf('    This may take a moment...\n');
             
-            fig = figure('Name', 'Collaborative Motion Animation', 'Position', [200, 200, 1200, 800]);
+            fig = figure('Name', 'Collaborative Motion Animation', 'Position', [200, 100, 1400, 900]);
             
             n_samples = length(results.time_vector);
-            dt = 0.05;
-            frame_skip = max(1, floor(0.1 / (results.time_vector(2) - results.time_vector(1))));
+            frame_skip = max(1, floor(n_samples / 100));  % Aim for ~100 frames
+            dt = 0.05;  % 50ms per frame
             
             for i = 1:frame_skip:n_samples
                 clf(fig);
                 hold on;
                 grid on;
-                axis equal;
                 
-                % Draw both robots
-                plot_robot_at_config(results.robot1.q_trajectory(:, i), robot1, 'b');
-                plot_robot_at_config(results.robot2.q_trajectory(:, i), robot2, 'r');
+                % Draw both robots with links
+                Collaborative_DualArm_Functions.draw_robot_links(...
+                    results.robot1.q_trajectory(:, i), robot1, 'b', 1.0, 4);
+                Collaborative_DualArm_Functions.draw_robot_links(...
+                    results.robot2.q_trajectory(:, i), robot2, 'r', 1.0, 4);
+                
+                % Draw bases
+                scatter3(robot1.base_position(1), robot1.base_position(2), robot1.base_position(3), ...
+                         300, 'b', 'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 2);
+                scatter3(robot2.base_position(1), robot2.base_position(2), robot2.base_position(3), ...
+                         300, 'r', 'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 2);
                 
                 % Draw load if grasped
                 if results.grasp_states(i)
-                    draw_load_box(results.load.position(:, i), load_params);
+                    draw_load_box(results.load.position(:, i), load_params, 0.8);
                     
-                    % Connection lines
+                    % Connection lines from EE to load
                     plot3([results.robot1.ee_position(1, i), results.load.position(1, i)], ...
                           [results.robot1.ee_position(2, i), results.load.position(2, i)], ...
                           [results.robot1.ee_position(3, i), results.load.position(3, i)], ...
-                          'g-', 'LineWidth', 2);
+                          'g-', 'LineWidth', 3);
                     plot3([results.robot2.ee_position(1, i), results.load.position(1, i)], ...
                           [results.robot2.ee_position(2, i), results.load.position(2, i)], ...
                           [results.robot2.ee_position(3, i), results.load.position(3, i)], ...
-                          'g-', 'LineWidth', 2);
+                          'g-', 'LineWidth', 3);
                 end
                 
-                % Trajectory traces
-                plot3(results.robot1.ee_position(1, 1:i), results.robot1.ee_position(2, 1:i), ...
-                      results.robot1.ee_position(3, 1:i), 'b--', 'LineWidth', 1);
-                plot3(results.robot2.ee_position(1, 1:i), results.robot2.ee_position(2, 1:i), ...
-                      results.robot2.ee_position(3, 1:i), 'r--', 'LineWidth', 1);
+                % Trajectory traces (faded)
+                if i > 1
+                    plot3(results.robot1.ee_position(1, 1:i), results.robot1.ee_position(2, 1:i), ...
+                          results.robot1.ee_position(3, 1:i), 'b:', 'LineWidth', 1.5);
+                    plot3(results.robot2.ee_position(1, 1:i), results.robot2.ee_position(2, 1:i), ...
+                          results.robot2.ee_position(3, 1:i), 'r:', 'LineWidth', 1.5);
+                    
+                    % Load trace if grasped
+                    grasped_so_far = find(results.grasp_states(1:i));
+                    if ~isempty(grasped_so_far)
+                        plot3(results.load.position(1, grasped_so_far), ...
+                              results.load.position(2, grasped_so_far), ...
+                              results.load.position(3, grasped_so_far), ...
+                              'g:', 'LineWidth', 2);
+                    end
+                end
                 
-                xlabel('X (m)');
-                ylabel('Y (m)');
-                zlabel('Z (m)');
-                title(sprintf('Collaborative Motion - t=%.2fs | %s', ...
-                      results.time_vector(i), tern(results.grasp_states(i), 'GRASPED', 'FREE')));
-                view(45, 30);
+                % Styling
+                xlabel('X (m)', 'FontSize', 12, 'FontWeight', 'bold');
+                ylabel('Y (m)', 'FontSize', 12, 'FontWeight', 'bold');
+                zlabel('Z (m)', 'FontSize', 12, 'FontWeight', 'bold');
+                
+                % Status title
+                status_str = sprintf('t = %.2f s / %.2f s | ', ...
+                                    results.time_vector(i), results.time_vector(end));
+                if results.grasp_states(i)
+                    status_str = [status_str, '🤝 LOAD GRASPED'];
+                    title_color = [0, 0.5, 0];
+                else
+                    status_str = [status_str, '✋ LOAD FREE'];
+                    title_color = [0.5, 0.5, 0.5];
+                end
+                
+                title(status_str, 'FontSize', 14, 'FontWeight', 'bold', 'Color', title_color);
+                
+                axis equal;
+                view(45, 25);
+                
+                % Set consistent axis limits
+                all_x = [results.robot1.ee_position(1,:), results.robot2.ee_position(2,:)];
+                all_y = [results.robot1.ee_position(2,:), results.robot2.ee_position(2,:)];
+                all_z = [results.robot1.ee_position(3,:), results.robot2.ee_position(3,:)];
+                
+                x_range = [min(all_x)-0.3, max(all_x)+0.3];
+                y_range = [min(all_y)-0.3, max(all_y)+0.3];
+                z_range = [0, max(all_z)+0.3];
+                
+                xlim(x_range);
+                ylim(y_range);
+                zlim(z_range);
                 
                 drawnow;
                 pause(dt);
@@ -804,6 +873,69 @@ classdef Collaborative_DualArm_Functions
                    'Robot %d: Final config must match number of links', robot_id);
         end
         
+        function draw_robot_links(q, robot_params, color, alpha, linewidth)
+            % Draw robot with links at given configuration
+            %
+            % INPUTS:
+            %   q - Joint configuration
+            %   robot_params - Robot structure with link_vectors, joint_axes, etc.
+            %   color - Color for links (e.g., 'b', 'r', [0.5 0.5 0.5])
+            %   alpha - Transparency (0-1)
+            %   linewidth - Line width for links
+            
+            n_links = size(robot_params.link_vectors, 2);
+            
+            % Compute link positions using forward kinematics
+            positions = zeros(3, n_links + 1);
+            positions(:, 1) = robot_params.base_position;
+            
+            % Current transformation
+            current_pos = robot_params.base_position;
+            current_rot = eye(3);
+            
+            for k = 1:n_links
+                % Get link vector and joint axis
+                link_vec = robot_params.link_vectors(:, k);
+                joint_axis = robot_params.joint_axes(:, k);
+                joint_type = robot_params.joint_types(k);
+                
+                % Transform link vector to world frame
+                link_vec_world = current_rot * link_vec;
+                current_pos = current_pos + link_vec_world;
+                
+                % Apply joint rotation
+                if strcmpi(joint_type, 'R')
+                    R_joint = ARAT_Core.rodrigues_rotation(joint_axis, q(k));
+                    current_rot = current_rot * R_joint;
+                end
+                
+                positions(:, k + 1) = current_pos;
+            end
+            
+            % Draw links
+            for k = 1:n_links
+                p1 = positions(:, k);
+                p2 = positions(:, k + 1);
+                
+                % Draw link as thick line
+                plot3([p1(1), p2(1)], [p1(2), p2(2)], [p1(3), p2(3)], ...
+                      'Color', color, 'LineWidth', linewidth);
+                
+                % Draw joint as sphere
+                [X, Y, Z] = sphere(10);
+                radius = 0.03;
+                surf(X*radius + p1(1), Y*radius + p1(2), Z*radius + p1(3), ...
+                     'FaceColor', color, 'EdgeColor', 'none', 'FaceAlpha', alpha);
+            end
+            
+            % Draw end-effector as larger sphere
+            ee_pos = positions(:, end);
+            [X, Y, Z] = sphere(12);
+            radius = 0.05;
+            surf(X*radius + ee_pos(1), Y*radius + ee_pos(2), Z*radius + ee_pos(3), ...
+                 'FaceColor', color, 'EdgeColor', 'k', 'LineWidth', 1.5, 'FaceAlpha', alpha);
+        end
+        
     end
 end
 
@@ -817,32 +949,12 @@ function result = tern(cond, true_val, false_val)
     end
 end
 
-function plot_robot_at_config(q, robot_params, color)
-    % Plot robot at given configuration
-    robot_struct.link_vectors = robot_params.link_vectors;
-    robot_struct.joint_axes = robot_params.joint_axes;
-    robot_struct.joint_types = robot_params.joint_types;
-    robot_struct.V_base = zeros(6,1);
-    
-    [positions, ~] = RobotVisualizer.compute_link_positions(robot_struct, q);
-    positions = positions + robot_params.base_position;
-    
-    n = size(positions, 2) - 1;
-    for k = 1:n
-        p1 = positions(:, k);
-        p2 = positions(:, k+1);
-        plot3([p1(1), p2(1)], [p1(2), p2(2)], [p1(3), p2(3)], ...
-              'Color', color, 'LineWidth', 4);
-        scatter3(p1(1), p1(2), p1(3), 80, color, 'filled');
+function draw_load_box(center, load_params, alpha)
+    % Draw 3D box representing load
+    if nargin < 3
+        alpha = 0.8;
     end
     
-    p_end = positions(:, end);
-    scatter3(p_end(1), p_end(2), p_end(3), 120, color, 'filled', ...
-            'MarkerEdgeColor', 'k', 'LineWidth', 2);
-end
-
-function draw_load_box(center, load_params)
-    % Draw 3D box representing load
     l = load_params.size(1) / 2;
     w = load_params.size(2) / 2;
     h = load_params.size(3) / 2;
@@ -860,6 +972,6 @@ function draw_load_box(center, load_params)
     ];
     
     patch('Vertices', vertices, 'Faces', faces, ...
-          'FaceColor', [0.8, 0.6, 0.2], 'FaceAlpha', 0.8, ...
+          'FaceColor', [0.8, 0.6, 0.2], 'FaceAlpha', alpha, ...
           'EdgeColor', 'k', 'LineWidth', 1.5);
 end

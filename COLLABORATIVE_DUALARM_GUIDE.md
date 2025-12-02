@@ -369,15 +369,22 @@ OVERALL COOPERATIVE PERFORMANCE:
 #### Figure 1: Collaborative Workspace
 
 Shows:
-- **Blue line**: Robot 1 end-effector path
-- **Red line**: Robot 2 end-effector path
-- **Green line**: Load trajectory (when grasped)
-- **Blue/Red dots**: Robot base positions
+- **Blue dashed line**: Robot 1 end-effector path
+- **Red dashed line**: Robot 2 end-effector path
+- **Green solid line**: Load trajectory (when grasped)
+- **Robot structures**: Shown at 3 key positions (initial, mid, final) with:
+  - Thick colored links
+  - Spherical joints
+  - Large end-effector spheres
+- **Load boxes**: Orange/gold semi-transparent boxes
+- **Blue/Red base markers**: Robot base positions
 
 **What to look for:**
 - ✅ Smooth, coordinated paths
 - ✅ Load trajectory follows EE paths during grasp
 - ✅ Paths don't collide
+- ✅ Robot configurations show realistic motion
+- ✅ Load stays between end-effectors when grasped
 
 #### Figure 2: Coordination Analysis
 
@@ -412,6 +419,44 @@ Shows joint angles over time for both robots:
 - ✅ Smooth trajectories (no jumps)
 - ✅ Synchronized motion during grasp
 - ✅ Joint limits respected
+
+#### Animation: Real-Time Motion Visualization ⭐ NEW!
+
+The system now includes a **fully animated 3D visualization** showing:
+
+**Robot Visualization:**
+- **Complete robot structures** with all links rendered
+- **Spherical joints** at each joint location
+- **Large end-effector markers** for easy tracking
+- **Thick colored links** (blue for Robot 1, red for Robot 2)
+
+**Load Visualization:**
+- **3D box** representing the common load
+- **Orange/gold color** with semi-transparency
+- **Only visible when grasped**
+- **Green connection lines** from EEs to load center
+
+**Motion Features:**
+- **Trajectory traces** (dotted lines showing past motion)
+- **Real-time status** showing time and grasp state
+- **~100 frames** for smooth animation
+- **Consistent axis scaling** throughout
+
+**Status Display:**
+- `🤝 LOAD GRASPED` (green text) - robots holding load
+- `✋ LOAD FREE` (gray text) - load released
+
+**To Enable/Disable:**
+```matlab
+% In Collaborative_DualArm_Interface.m
+create_animation = true;   % Enable animation
+create_animation = false;  % Disable (faster)
+```
+
+**Performance:**
+- Animation takes 10-30 seconds depending on trajectory length
+- Uses ~100 frames (automatically adjusted)
+- 50ms pause between frames for smooth playback
 
 ### Exported Data
 
