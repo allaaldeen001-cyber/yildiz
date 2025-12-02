@@ -441,29 +441,28 @@ void calibrateAltitude() {
 void readRadio() {
   // Check if data available
   if (radio.available()) {
-    // Read packet
-    bool success = radio.read(&rcData, sizeof(RadioPacket));
+    // Read packet (radio.read returns void, not bool)
+    radio.read(&rcData, sizeof(RadioPacket));
     
-    if (success) {
-      lastRadioTime = currentTime;
-      radioConnected = true;
-      
-      // Optional: Send ACK payload (telemetry back to RC)
-      // Uncomment if you want bidirectional communication
-      /*
-      struct TelemetryPacket {
-        float batteryVoltage;
-        float altitude;
-        uint8_t armed;
-      } telemetry;
-      
-      telemetry.batteryVoltage = 11.1; // Read from analog pin
-      telemetry.altitude = currentAltitude;
-      telemetry.armed = armed;
-      
-      radio.writeAckPayload(1, &telemetry, sizeof(TelemetryPacket));
-      */
-    }
+    // Update connection status
+    lastRadioTime = currentTime;
+    radioConnected = true;
+    
+    // Optional: Send ACK payload (telemetry back to RC)
+    // Uncomment if you want bidirectional communication
+    /*
+    struct TelemetryPacket {
+      float batteryVoltage;
+      float altitude;
+      uint8_t armed;
+    } telemetry;
+    
+    telemetry.batteryVoltage = 11.1; // Read from analog pin
+    telemetry.altitude = currentAltitude;
+    telemetry.armed = armed;
+    
+    radio.writeAckPayload(1, &telemetry, sizeof(TelemetryPacket));
+    */
   } else {
     // Failsafe: No signal for 1 second
     if (currentTime - lastRadioTime > 1000) {
