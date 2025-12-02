@@ -44,6 +44,21 @@ example_scara_robot
 
 **Duration:** ~45 seconds
 
+### Example C: Dual-Arm Collaborative System
+
+```matlab
+example_dual_arm_collaborative
+```
+
+**What you'll see:**
+- 2 robots working together
+- Common load handling
+- Coordinated trajectories
+- Shared workspace
+- Synchronized animation
+
+**Duration:** ~60 seconds
+
 ## Step 3: Create Your Own Robot
 
 ### Minimal Example

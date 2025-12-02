@@ -36,6 +36,8 @@ A comprehensive MATLAB project for simulating robot manipulators using **Spatial
 │   ├── example_3dof_robot.m           # 3-DOF RRR example
 │   ├── example_scara_robot.m          # SCARA RRPR example
 │   ├── example_complete_workflow.m    # Complete demo
+│   ├── example_dual_arm_collaborative.m  # Dual-arm with common load
+│   ├── dual_arm_simulator.m           # Interactive dual-arm
 │   └── robot_config_template.m        # Configuration templates
 │
 ├── 🧪 TESTING
@@ -84,6 +86,23 @@ example_scara_robot
 - Pick-and-place operation
 - Workspace analysis
 - Multiple IK tests
+
+#### Dual-Arm Collaborative System
+```matlab
+example_dual_arm_collaborative
+```
+- 2 manipulators working together
+- Common load handling
+- Coordinated motion
+- Shared workspace visualization
+
+#### Interactive Dual-Arm Simulator
+```matlab
+dual_arm_simulator
+```
+- Configure 2 robots interactively
+- Multiple task types (coordinated, pick-place, assembly)
+- Synchronized trajectory generation
 
 ## 📚 Mathematical Foundation
 

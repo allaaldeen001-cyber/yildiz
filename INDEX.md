@@ -17,6 +17,8 @@
 1. **[example_3dof_robot.m](example_3dof_robot.m)** - 3-DOF robot (BEGINNER)
 2. **[example_scara_robot.m](example_scara_robot.m)** - SCARA robot (INTERMEDIATE)
 3. **[example_complete_workflow.m](example_complete_workflow.m)** - Complete demo (ADVANCED)
+4. **[example_dual_arm_collaborative.m](example_dual_arm_collaborative.m)** - Dual-arm system (ADVANCED)
+5. **[dual_arm_simulator.m](dual_arm_simulator.m)** - Interactive dual-arm (CUSTOM)
 
 ### 🔧 Templates
 - **[robot_config_template.m](robot_config_template.m)** - Configuration templates
@@ -33,10 +35,11 @@
 ```
 /workspace/
 │
-├── 📘 DOCUMENTATION (4 files)
+├── 📘 DOCUMENTATION (5 files)
 │   ├── README.md                      # Main documentation (comprehensive)
 │   ├── QUICKSTART.md                  # Quick start guide
 │   ├── PROJECT_SUMMARY.md             # Project overview
+│   ├── DUAL_ARM_GUIDE.md              # Dual-arm systems guide
 │   └── INDEX.md                       # This file
 │
 ├── 🧮 CORE LIBRARIES (3 files)
@@ -47,10 +50,12 @@
 ├── 🎮 MAIN SCRIPTS (1 file)
 │   └── robot_simulator_main.m         # Interactive simulator
 │
-├── 📚 EXAMPLES (4 files)
+├── 📚 EXAMPLES (6 files)
 │   ├── example_3dof_robot.m           # 3-DOF RRR example
 │   ├── example_scara_robot.m          # SCARA RRPR example
 │   ├── example_complete_workflow.m    # Complete workflow demo
+│   ├── example_dual_arm_collaborative.m  # Dual-arm with load
+│   ├── dual_arm_simulator.m           # Interactive dual-arm
 │   └── robot_config_template.m        # Configuration templates
 │
 ├── 🧪 TESTING (1 file)

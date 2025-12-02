@@ -96,12 +96,14 @@ Test installation:
     >> test_installation
 
 Run examples:
-    >> example_3dof_robot
-    >> example_scara_robot
-    >> example_complete_workflow
+    >> example_3dof_robot              % Single arm - beginner
+    >> example_scara_robot             % SCARA robot
+    >> example_complete_workflow       % Complete features
+    >> example_dual_arm_collaborative  % Dual-arm system
 
 Interactive mode:
-    >> robot_simulator_main
+    >> robot_simulator_main            % Single robot
+    >> dual_arm_simulator              % Two robots
 
 Get help:
     >> help ARAT_Core
