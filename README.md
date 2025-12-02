@@ -8,11 +8,14 @@ A comprehensive MATLAB project for simulating robot manipulators using **Spatial
 - ✅ **Forward Kinematics** with velocity propagation
 - ✅ **Inverse Kinematics** using Damped Least Squares (Levenberg-Marquardt)
 - ✅ **Multiple Trajectory Types**: Cubic Polynomial, Harmonic, Cycloidal, Gutman 1-3, Freudenstein 1-3-5
-- ✅ **3D Visualization & Animation** with coordinate frames
+- ✅ **3D Visualization & Animation** with coordinate frames and robot links
 - ✅ **Jacobian Computation** using SOA propagation matrices
-- ✅ **Dynamic Analysis** using Recursive Newton-Euler
+- ✅ **Dynamic Analysis** using Recursive Newton-Euler (joint torques, power, energy) ⭐ NEW!
+- ✅ **Collaborative Manipulation** with common load handling ⭐ NEW!
 - ✅ **Support for any joint configuration**: Rotational (R) and Prismatic (P)
-- ✅ **Data Export**: Joint angles (Θ), Jacobian matrices, H matrices (joint maps), Φ matrices (propagation)
+- ✅ **Moving Platform** support (mobile base)
+- ✅ **Cooperative Constraints** (kinematic and dynamic)
+- ✅ **Data Export**: Joint angles (Θ), Jacobian matrices, H matrices, Φ matrices, torques, power, energy
 
 ## 📁 Project Structure
 
@@ -32,11 +35,13 @@ A comprehensive MATLAB project for simulating robot manipulators using **Spatial
 │   ├── RobotIK.m                      # Inverse kinematics solver
 │   ├── RobotVisualizer.m              # Visualization tools
 │   ├── Kinematic_SOA_Functions.m      # Kinematic analysis backend
+│   ├── Dynamic_SOA_Functions.m        # Dynamic analysis backend ⭐ NEW!
 │   └── Collaborative_DualArm_Functions.m  # Collaborative manipulation backend
 │
 ├── 🎮 MAIN SCRIPTS
 │   ├── robot_simulator_main.m         # Interactive simulator
 │   ├── Kinematic_User_Interface.m     # Kinematic analysis interface
+│   ├── Dynamic_User_Interface.m       # Dynamic analysis interface ⭐ NEW!
 │   └── Collaborative_DualArm_Interface.m  # Collaborative manipulation interface
 │
 ├── 📚 EXAMPLES
@@ -406,6 +411,55 @@ The system automatically:
 - **Cooperative Verification**: Checks stability, balance, and synchronization
 
 **See:** `COLLABORATIVE_DUALARM_GUIDE.md` for complete documentation
+
+### Dynamic Analysis (NEW!) ⚡
+
+Compute joint torques using recursive Newton-Euler algorithm:
+
+```matlab
+% Open and configure the interface
+open Dynamic_User_Interface.m
+
+% Edit the CONFIGURATION section to define:
+% - Robot parameters (kinematics)
+% - Mass and inertia properties (NEW!)
+% - Trajectory parameters
+% - Optional: moving platform, constraints
+
+% Run the script
+run Dynamic_User_Interface.m
+```
+
+The system automatically:
+- ✅ Generates position, velocity, and acceleration trajectories
+- ✅ Computes joint torques using recursive Newton-Euler (SOA)
+- ✅ Calculates instantaneous power and cumulative energy
+- ✅ Creates torque plots for all joints
+- ✅ Analyzes power consumption
+- ✅ Exports all dynamic data
+
+**Key Features:**
+- **Any DOF**: Works for 3, 6, 9, ... n-link robots
+- **Multiple Robots**: Analyze 1, 2, 3, ... p robots simultaneously
+- **Moving Platform**: Compute dynamics on mobile base
+- **Cooperative Dynamics**: Force distribution and constraints
+- **Prismatic Joints**: Supports both R and P joints
+
+**Dynamic Analysis Parts:**
+- Part 6: Fixed 6-link serial robot
+- Part 7: n-link serial robot (generalized)
+- Part 8: Two 6-link serial robots
+- Part 9: Two n-link serial robots
+- Part 10: p robots with arbitrary n (most general)
+
+**See:** `DYNAMIC_ANALYSIS_GUIDE.md` for complete documentation
+
+**Quick Example:**
+```matlab
+example_dynamics_6dof  % 6-DOF robot with full torque analysis
+```
+
+---
 
 ## 🔍 Troubleshooting
 

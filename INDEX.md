@@ -13,15 +13,18 @@
 
 ### 🎮 Interactive Mode
 - **[robot_simulator_main.m](robot_simulator_main.m)** - Main interactive simulator
-- **[Collaborative_DualArm_Interface.m](Collaborative_DualArm_Interface.m)** - Collaborative dual-arm interface ⭐ NEW!
+- **[Kinematic_User_Interface.m](Kinematic_User_Interface.m)** - Kinematic analysis interface
+- **[Dynamic_User_Interface.m](Dynamic_User_Interface.m)** - Dynamic analysis interface ⭐ NEW!
+- **[Collaborative_DualArm_Interface.m](Collaborative_DualArm_Interface.m)** - Collaborative dual-arm interface
 
 ### 📚 Examples (Run in this order)
 1. **[example_3dof_robot.m](example_3dof_robot.m)** - 3-DOF robot (BEGINNER)
 2. **[example_scara_robot.m](example_scara_robot.m)** - SCARA robot (INTERMEDIATE)
 3. **[example_complete_workflow.m](example_complete_workflow.m)** - Complete demo (ADVANCED)
 4. **[example_dual_arm_collaborative.m](example_dual_arm_collaborative.m)** - Dual-arm system (ADVANCED)
-5. **[example_collaborative_quick.m](example_collaborative_quick.m)** - Collaborative manipulation (ADVANCED) ⭐ NEW!
-6. **[dual_arm_simulator.m](dual_arm_simulator.m)** - Interactive dual-arm (CUSTOM)
+5. **[example_collaborative_quick.m](example_collaborative_quick.m)** - Collaborative manipulation (ADVANCED)
+6. **[example_dynamics_6dof.m](example_dynamics_6dof.m)** - Dynamic analysis 6-DOF (ADVANCED) ⭐ NEW!
+7. **[dual_arm_simulator.m](dual_arm_simulator.m)** - Interactive dual-arm (CUSTOM)
 
 ### 🔧 Templates
 - **[robot_config_template.m](robot_config_template.m)** - Configuration templates
@@ -30,7 +33,9 @@
 - **[ARAT_Core.m](ARAT_Core.m)** - SOA mathematical core
 - **[RobotIK.m](RobotIK.m)** - Inverse kinematics
 - **[RobotVisualizer.m](RobotVisualizer.m)** - Visualization & animation
-- **[Collaborative_DualArm_Functions.m](Collaborative_DualArm_Functions.m)** - Collaborative manipulation backend ⭐ NEW!
+- **[Kinematic_SOA_Functions.m](Kinematic_SOA_Functions.m)** - Kinematic analysis backend
+- **[Dynamic_SOA_Functions.m](Dynamic_SOA_Functions.m)** - Dynamic analysis backend ⭐ NEW!
+- **[Collaborative_DualArm_Functions.m](Collaborative_DualArm_Functions.m)** - Collaborative manipulation backend
 
 ---
 

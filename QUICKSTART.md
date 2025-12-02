@@ -78,6 +78,24 @@ example_collaborative_quick
 
 **For full control:** Use `Collaborative_DualArm_Interface.m` to configure custom robots, loads, and tasks.
 
+### Example E: Dynamic Analysis (NEW!) ⚡
+
+```matlab
+example_dynamics_6dof
+```
+
+**What you'll see:**
+- 6-DOF robot with mass/inertia properties
+- Joint torque computation (recursive Newton-Euler)
+- Torque plots for all 6 joints
+- Power and energy curves
+- Peak and RMS torque values
+- Complete dynamic analysis
+
+**Duration:** ~20 seconds
+
+**For full control:** Use `Dynamic_User_Interface.m` to configure custom robots, masses, and trajectories.
+
 ## Step 3: Create Your Own Robot
 
 ### Minimal Example
