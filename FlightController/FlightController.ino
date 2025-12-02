@@ -599,7 +599,11 @@ void handleButtons() {
         motorRL.writeMicroseconds(1150);
       } else {
         motorTestStep = 0;
-        stopMotors();
+        // Stop all motors
+        motorFL.writeMicroseconds(1000);
+        motorFR.writeMicroseconds(1000);
+        motorRR.writeMicroseconds(1000);
+        motorRL.writeMicroseconds(1000);
         Serial.println(F("✅ Motor test complete!"));
         beep(2);
       }
