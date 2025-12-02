@@ -6,19 +6,22 @@
 1. **[README.md](README.md)** - Complete documentation
 2. **[QUICKSTART.md](QUICKSTART.md)** - 5-minute quick start
 3. **[PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)** - Project overview
+4. **[COLLABORATIVE_DUALARM_GUIDE.md](COLLABORATIVE_DUALARM_GUIDE.md)** - Collaborative manipulation guide
 
 ### 🧪 Testing
 - **[test_installation.m](test_installation.m)** - Run first to verify installation
 
 ### 🎮 Interactive Mode
 - **[robot_simulator_main.m](robot_simulator_main.m)** - Main interactive simulator
+- **[Collaborative_DualArm_Interface.m](Collaborative_DualArm_Interface.m)** - Collaborative dual-arm interface ⭐ NEW!
 
 ### 📚 Examples (Run in this order)
 1. **[example_3dof_robot.m](example_3dof_robot.m)** - 3-DOF robot (BEGINNER)
 2. **[example_scara_robot.m](example_scara_robot.m)** - SCARA robot (INTERMEDIATE)
 3. **[example_complete_workflow.m](example_complete_workflow.m)** - Complete demo (ADVANCED)
 4. **[example_dual_arm_collaborative.m](example_dual_arm_collaborative.m)** - Dual-arm system (ADVANCED)
-5. **[dual_arm_simulator.m](dual_arm_simulator.m)** - Interactive dual-arm (CUSTOM)
+5. **[example_collaborative_quick.m](example_collaborative_quick.m)** - Collaborative manipulation (ADVANCED) ⭐ NEW!
+6. **[dual_arm_simulator.m](dual_arm_simulator.m)** - Interactive dual-arm (CUSTOM)
 
 ### 🔧 Templates
 - **[robot_config_template.m](robot_config_template.m)** - Configuration templates
@@ -27,6 +30,7 @@
 - **[ARAT_Core.m](ARAT_Core.m)** - SOA mathematical core
 - **[RobotIK.m](RobotIK.m)** - Inverse kinematics
 - **[RobotVisualizer.m](RobotVisualizer.m)** - Visualization & animation
+- **[Collaborative_DualArm_Functions.m](Collaborative_DualArm_Functions.m)** - Collaborative manipulation backend ⭐ NEW!
 
 ---
 
@@ -35,26 +39,33 @@
 ```
 /workspace/
 │
-├── 📘 DOCUMENTATION (5 files)
+├── 📘 DOCUMENTATION (7 files)
 │   ├── README.md                      # Main documentation (comprehensive)
 │   ├── QUICKSTART.md                  # Quick start guide
 │   ├── PROJECT_SUMMARY.md             # Project overview
 │   ├── DUAL_ARM_GUIDE.md              # Dual-arm systems guide
+│   ├── COLLABORATIVE_DUALARM_GUIDE.md # Collaborative manipulation guide
+│   ├── KINEMATIC_TWO_FILES_GUIDE.md   # Kinematic analysis guide
 │   └── INDEX.md                       # This file
 │
-├── 🧮 CORE LIBRARIES (3 files)
+├── 🧮 CORE LIBRARIES (5 files)
 │   ├── ARAT_Core.m                    # Spatial Operator Algebra core
 │   ├── RobotIK.m                      # Inverse kinematics solver
-│   └── RobotVisualizer.m              # Visualization tools
+│   ├── RobotVisualizer.m              # Visualization tools
+│   ├── Kinematic_SOA_Functions.m      # Kinematic analysis backend
+│   └── Collaborative_DualArm_Functions.m  # Collaborative manipulation backend
 │
-├── 🎮 MAIN SCRIPTS (1 file)
-│   └── robot_simulator_main.m         # Interactive simulator
+├── 🎮 MAIN SCRIPTS (3 files)
+│   ├── robot_simulator_main.m         # Interactive simulator
+│   ├── Kinematic_User_Interface.m     # Kinematic analysis interface
+│   └── Collaborative_DualArm_Interface.m  # Collaborative manipulation interface
 │
-├── 📚 EXAMPLES (6 files)
+├── 📚 EXAMPLES (7 files)
 │   ├── example_3dof_robot.m           # 3-DOF RRR example
 │   ├── example_scara_robot.m          # SCARA RRPR example
 │   ├── example_complete_workflow.m    # Complete workflow demo
 │   ├── example_dual_arm_collaborative.m  # Dual-arm with load
+│   ├── example_collaborative_quick.m  # Quick collaborative example
 │   ├── dual_arm_simulator.m           # Interactive dual-arm
 │   └── robot_config_template.m        # Configuration templates
 │
@@ -249,6 +260,25 @@ example_scara_robot
 example_complete_workflow
 ```
 
+#### example_collaborative_quick.m (~350 lines) ⭐ NEW!
+**Robot:** Two 3-DOF robots with common load  
+**Level:** ⭐⭐⭐ ADVANCED  
+**Duration:** ~45 seconds  
+
+**Demonstrates:**
+- Two robots working together
+- Common load handling (3kg box)
+- Pick-and-place task (8 phases)
+- Grasp state tracking
+- Force distribution
+- Velocity synchronization
+- Cooperation verification
+
+**Run:**
+```matlab
+example_collaborative_quick
+```
+
 #### robot_config_template.m (~200 lines)
 **Purpose:** Configuration templates  
 
@@ -331,18 +361,24 @@ Tests failed: 0
 **...learn about the project**
 → Read [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)
 
+**...simulate two robots working together** ⭐ NEW!
+→ Run `example_collaborative_quick.m` or use `Collaborative_DualArm_Interface.m`
+
+**...handle a common load with two robots** ⭐ NEW!
+→ Read [COLLABORATIVE_DUALARM_GUIDE.md](COLLABORATIVE_DUALARM_GUIDE.md)
+
 ---
 
 ## 📊 File Statistics
 
 | Category | Files | Lines of Code |
 |----------|-------|---------------|
-| Core Libraries | 3 | ~600 |
-| Main Script | 1 | ~250 |
-| Examples | 4 | ~1,200 |
+| Core Libraries | 5 | ~1,800 |
+| Main Scripts | 3 | ~650 |
+| Examples | 7 | ~2,000 |
 | Testing | 1 | ~200 |
-| Documentation | 4 | ~6,000 words |
-| **TOTAL** | **13** | **~2,250 code** |
+| Documentation | 7 | ~15,000 words |
+| **TOTAL** | **23** | **~4,650 code** |
 
 ---
 
@@ -388,9 +424,11 @@ test_installation
 example_3dof_robot          % Beginner
 example_scara_robot         % Intermediate
 example_complete_workflow   % Advanced
+example_collaborative_quick % Collaborative (NEW!)
 
 % === INTERACTIVE ===
 robot_simulator_main
+Collaborative_DualArm_Interface  % Collaborative manipulation (NEW!)
 
 % === CORE FUNCTIONS ===
 J = ARAT_Core.compute_jacobian(links, axes, types, q);

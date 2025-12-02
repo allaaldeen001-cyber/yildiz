@@ -22,15 +22,22 @@ A comprehensive MATLAB project for simulating robot manipulators using **Spatial
 │   ├── README.md                      # Complete documentation (this file)
 │   ├── QUICKSTART.md                  # Quick start guide
 │   ├── PROJECT_SUMMARY.md             # Project overview
-│   └── INDEX.md                       # File navigation
+│   ├── INDEX.md                       # File navigation
+│   ├── COLLABORATIVE_DUALARM_GUIDE.md # Collaborative manipulation guide
+│   ├── KINEMATIC_TWO_FILES_GUIDE.md   # Kinematic analysis guide
+│   └── DUAL_ARM_GUIDE.md              # Dual-arm systems guide
 │
 ├── 🧮 CORE LIBRARIES
 │   ├── ARAT_Core.m                    # SOA mathematical core
 │   ├── RobotIK.m                      # Inverse kinematics solver
-│   └── RobotVisualizer.m              # Visualization tools
+│   ├── RobotVisualizer.m              # Visualization tools
+│   ├── Kinematic_SOA_Functions.m      # Kinematic analysis backend
+│   └── Collaborative_DualArm_Functions.m  # Collaborative manipulation backend
 │
 ├── 🎮 MAIN SCRIPTS
-│   └── robot_simulator_main.m         # Interactive simulator
+│   ├── robot_simulator_main.m         # Interactive simulator
+│   ├── Kinematic_User_Interface.m     # Kinematic analysis interface
+│   └── Collaborative_DualArm_Interface.m  # Collaborative manipulation interface
 │
 ├── 📚 EXAMPLES
 │   ├── example_3dof_robot.m           # 3-DOF RRR example
@@ -103,6 +110,17 @@ dual_arm_simulator
 - Configure 2 robots interactively
 - Multiple task types (coordinated, pick-place, assembly)
 - Synchronized trajectory generation
+
+#### Collaborative Dual-Arm with Common Load ⭐ NEW!
+```matlab
+Collaborative_DualArm_Interface
+```
+- Two robots working together on a shared load
+- Coordinated manipulation (pick-and-place, transport, assembly)
+- Automatic grasp state tracking
+- Force distribution and synchronization analysis
+- Cooperative motion verification
+- See: `COLLABORATIVE_DUALARM_GUIDE.md` for full guide
 
 ## 📚 Mathematical Foundation
 
@@ -353,6 +371,41 @@ end
 % Visualize
 scatter3(workspace_points(1,:), workspace_points(2,:), workspace_points(3,:));
 ```
+
+### Collaborative Manipulation (NEW!)
+
+Simulate two robots working together with a common load:
+
+```matlab
+% Open and configure the interface
+open Collaborative_DualArm_Interface.m
+
+% Edit the CONFIGURATION section to define:
+% - Robot 1 parameters (links, joints, base position)
+% - Robot 2 parameters
+% - Common load (mass, size)
+% - Task type (pick_and_place, transport, assembly)
+% - Output options
+
+% Run the script
+run Collaborative_DualArm_Interface.m
+```
+
+The system automatically:
+- ✅ Generates coordinated trajectories
+- ✅ Computes synchronized kinematics
+- ✅ Tracks load position and forces
+- ✅ Analyzes cooperation quality (grasp stability, force balance, velocity sync)
+- ✅ Creates visualizations showing both robots and load
+- ✅ Exports all data and coordination metrics
+
+**Key Features:**
+- **Grasp State Tracking**: Automatically manages when robots grasp/release load
+- **Force Distribution**: Computes shared load forces
+- **Velocity Synchronization**: Ensures coordinated motion
+- **Cooperative Verification**: Checks stability, balance, and synchronization
+
+**See:** `COLLABORATIVE_DUALARM_GUIDE.md` for complete documentation
 
 ## 🔍 Troubleshooting
 

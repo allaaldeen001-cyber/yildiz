@@ -59,6 +59,25 @@ example_dual_arm_collaborative
 
 **Duration:** ~60 seconds
 
+### Example D: Collaborative Manipulation (NEW!) ⭐
+
+```matlab
+example_collaborative_quick
+```
+
+**What you'll see:**
+- Two 3-DOF robots working together
+- 3kg common load (box)
+- Pick-and-place task (8 phases)
+- Grasp state tracking
+- Force balance and velocity sync
+- Cooperation verification
+- Load trajectory visualization
+
+**Duration:** ~45 seconds
+
+**For full control:** Use `Collaborative_DualArm_Interface.m` to configure custom robots, loads, and tasks.
+
 ## Step 3: Create Your Own Robot
 
 ### Minimal Example
