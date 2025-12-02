@@ -1,0 +1,175 @@
+================================================================================
+  SOA ROBOT MANIPULATOR SIMULATOR - GETTING STARTED
+================================================================================
+
+Welcome! This guide will help you start using the simulator in under 5 minutes.
+
+================================================================================
+STEP 1: VERIFY INSTALLATION
+================================================================================
+
+Open MATLAB and navigate to this directory, then run:
+
+    >> test_installation
+
+Expected output: "All tests passed!"
+
+If any tests fail, check the error messages for guidance.
+
+================================================================================
+STEP 2: RUN YOUR FIRST EXAMPLE
+================================================================================
+
+Run the beginner example:
+
+    >> example_3dof_robot
+
+This will:
+  - Show robot configurations
+  - Compare trajectory methods
+  - Solve inverse kinematics
+  - Display animated robot motion
+  - Export data to output/ folder
+
+Duration: ~30 seconds
+
+================================================================================
+STEP 3: EXPLORE MORE EXAMPLES
+================================================================================
+
+Try the SCARA robot example:
+
+    >> example_scara_robot
+
+Or run the complete workflow:
+
+    >> example_complete_workflow
+
+================================================================================
+STEP 4: USE INTERACTIVE MODE
+================================================================================
+
+For custom robots, run the interactive simulator:
+
+    >> robot_simulator_main
+
+Follow the prompts to enter your robot configuration.
+
+================================================================================
+STEP 5: CREATE YOUR OWN ROBOT
+================================================================================
+
+Use the template:
+
+    >> robot = robot_config_template();
+    >> q = [0; 0; 0];  % Joint configuration
+    >> RobotVisualizer.plot_robot(robot, q);
+
+================================================================================
+DOCUMENTATION
+================================================================================
+
+For detailed information, read these files:
+
+  1. QUICKSTART.md     - Quick start guide with examples
+  2. README.md         - Complete documentation
+  3. INDEX.md          - File navigation
+  4. PROJECT_SUMMARY.md - Project overview
+
+================================================================================
+KEY FEATURES
+================================================================================
+
+✓ Forward & Inverse Kinematics
+✓ 5 Trajectory Generation Methods
+✓ 3D Visualization & Animation
+✓ Jacobian Analysis
+✓ Support for R and P joints
+✓ Data Export (CSV & MAT)
+✓ Works with any n-DOF robot
+
+================================================================================
+QUICK COMMAND REFERENCE
+================================================================================
+
+Test installation:
+    >> test_installation
+
+Run examples:
+    >> example_3dof_robot
+    >> example_scara_robot
+    >> example_complete_workflow
+
+Interactive mode:
+    >> robot_simulator_main
+
+Get help:
+    >> help ARAT_Core
+    >> help RobotIK
+    >> help RobotVisualizer
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Problem: "Undefined function or variable"
+Solution: Make sure you're in the correct directory
+
+Problem: Figures don't appear
+Solution: Check MATLAB graphics: opengl info
+
+Problem: IK doesn't converge
+Solution: Target may be out of workspace; try different position
+
+For more help, see README.md Troubleshooting section.
+
+================================================================================
+EXAMPLE: MINIMAL CODE
+================================================================================
+
+% Define a simple 2-DOF robot
+robot.n_joints = 2;
+robot.link_vectors = [0.5, 0.3; 0, 0; 0, 0];
+robot.joint_axes = [0, 0; 0, 0; 1, 1];
+robot.joint_types = 'RR';
+robot.V_base = zeros(6, 1);
+
+% Forward kinematics
+q = [pi/4; pi/6];
+pose = RobotIK.forward_kinematics_pose(robot, q);
+fprintf('End-effector: [%.3f, %.3f, %.3f]\n', pose(4), pose(5), pose(6));
+
+% Compute Jacobian
+J = ARAT_Core.compute_jacobian(robot.link_vectors, robot.joint_axes, ...
+                                robot.joint_types, q);
+disp('Jacobian:');
+disp(J);
+
+% Visualize
+RobotVisualizer.plot_robot(robot, q);
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+1. Run test_installation.m
+2. Try example_3dof_robot.m
+3. Read QUICKSTART.md
+4. Create your own robot
+5. Explore all features in example_complete_workflow.m
+
+================================================================================
+NEED HELP?
+================================================================================
+
+Check these resources in order:
+  1. QUICKSTART.md - Common tasks and examples
+  2. README.md - Detailed documentation
+  3. Code comments - Well-documented functions
+  4. Test file - test_installation.m shows usage
+
+================================================================================
+
+Ready to start? Run:  test_installation
+
+================================================================================
