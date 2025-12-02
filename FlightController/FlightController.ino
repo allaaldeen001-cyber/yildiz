@@ -536,38 +536,94 @@ void handleButtons() {
   }
   lastBtn1 = rcData.btn1;
   
-  // Button 2: Motor test (only if disarmed)
+  // Button 2: Motor test - TEST EACH MOTOR INDIVIDUALLY
+  static uint8_t motorTestStep = 0;
+  static unsigned long motorTestTimer = 0;
+  
   if (rcData.btn2 == LOW && lastBtn2 == HIGH && !armed) {
-    Serial.println(F("🔊 Motor test"));
-    motorFL.writeMicroseconds(1100);
-    motorFR.writeMicroseconds(1100);
-    motorRR.writeMicroseconds(1100);
-    motorRL.writeMicroseconds(1100);
+    motorTestStep = 1;
+    motorTestTimer = currentTime;
+    Serial.println(F("🔊 MOTOR TEST - CHECK DIRECTIONS!"));
+    Serial.println(F("   Spinning each motor for 2 seconds..."));
     beep(1);
-    delay(1000);
-    motorFL.writeMicroseconds(1000);
-    motorFR.writeMicroseconds(1000);
-    motorRR.writeMicroseconds(1000);
-    motorRL.writeMicroseconds(1000);
   }
   lastBtn2 = rcData.btn2;
   
-  // Button 3: Smooth landing
+  // Run motor test sequence
+  if (motorTestStep > 0 && !armed) {
+    unsigned long elapsed = currentTime - motorTestTimer;
+    
+    if (motorTestStep == 1) {
+      // Test Front-Left (CCW)
+      if (elapsed < 2000) {
+        Serial.println(F("   FL (D3) - Should spin CCW"));
+        motorFL.writeMicroseconds(1150);
+        motorFR.writeMicroseconds(1000);
+        motorRR.writeMicroseconds(1000);
+        motorRL.writeMicroseconds(1000);
+      } else {
+        motorTestStep = 2;
+        motorTestTimer = currentTime;
+      }
+    } else if (motorTestStep == 2) {
+      // Test Front-Right (CW)
+      if (elapsed < 2000) {
+        Serial.println(F("   FR (D5) - Should spin CW"));
+        motorFL.writeMicroseconds(1000);
+        motorFR.writeMicroseconds(1150);
+        motorRR.writeMicroseconds(1000);
+        motorRL.writeMicroseconds(1000);
+      } else {
+        motorTestStep = 3;
+        motorTestTimer = currentTime;
+      }
+    } else if (motorTestStep == 3) {
+      // Test Rear-Right (CCW)
+      if (elapsed < 2000) {
+        Serial.println(F("   RR (D6) - Should spin CCW"));
+        motorFL.writeMicroseconds(1000);
+        motorFR.writeMicroseconds(1000);
+        motorRR.writeMicroseconds(1150);
+        motorRL.writeMicroseconds(1000);
+      } else {
+        motorTestStep = 4;
+        motorTestTimer = currentTime;
+      }
+    } else if (motorTestStep == 4) {
+      // Test Rear-Left (CW)
+      if (elapsed < 2000) {
+        Serial.println(F("   RL (D9) - Should spin CW"));
+        motorFL.writeMicroseconds(1000);
+        motorFR.writeMicroseconds(1000);
+        motorRR.writeMicroseconds(1000);
+        motorRL.writeMicroseconds(1150);
+      } else {
+        motorTestStep = 0;
+        stopMotors();
+        Serial.println(F("✅ Motor test complete!"));
+        beep(2);
+      }
+    }
+  }
+  
+  // Button 3: Smooth landing (with altitude control)
   if (rcData.btn3 == LOW && lastBtn3 == HIGH && armed) {
-    Serial.println(F("🛬 Starting smooth landing..."));
+    Serial.println(F("🛬 Starting ALTITUDE-CONTROLLED landing..."));
     currentMode = MODE_LANDING;
     landingStartTime = currentTime;
+    targetAltitude = currentAltitude;  // Start from current altitude
     beep(1);
   }
   lastBtn3 = rcData.btn3;
   
-  // Button 4: Smooth takeoff
+  // Button 4: Smooth takeoff (with altitude control)
   if (rcData.btn4 == LOW && lastBtn4 == HIGH && !armed) {
-    Serial.println(F("🚁 ARM + Smooth takeoff initiated!"));
+    Serial.println(F("🚁 ALTITUDE-CONTROLLED takeoff!"));
+    Serial.println(F("   Using MS5611 for smooth rise to 150cm"));
     armed = true;
     currentMode = MODE_TAKEOFF;
     takeoffStartTime = currentTime;
-    targetAltitude = 0;
+    targetAltitude = currentAltitude;  // Start from ground level
     beep(1);
   }
   lastBtn4 = rcData.btn4;
@@ -582,35 +638,60 @@ void updateFlightMode() {
   if (currentMode == MODE_TAKEOFF) {
     float elapsed = currentTime - takeoffStartTime;
     
-    if (elapsed < TAKEOFF_DURATION) {
-      // Gradually increase target altitude
-      targetAltitude = (elapsed / TAKEOFF_DURATION) * TAKEOFF_HEIGHT;
+    // SMOOTH takeoff: Gradually increase target altitude over 3 seconds
+    if (elapsed < 3000) {
+      // Smooth S-curve for gentle acceleration/deceleration
+      float progress = elapsed / 3000.0;
+      // Ease-in-out curve
+      float smoothProgress = progress * progress * (3.0 - 2.0 * progress);
+      targetAltitude = smoothProgress * TAKEOFF_HEIGHT;
+      
+      // Debug output
+      if ((int)elapsed % 500 == 0) {
+        Serial.print(F("Takeoff: "));
+        Serial.print(targetAltitude, 0);
+        Serial.print(F("cm / "));
+        Serial.print(TAKEOFF_HEIGHT, 0);
+        Serial.println(F("cm"));
+      }
     } else {
       // Takeoff complete, switch to altitude hold
       targetAltitude = TAKEOFF_HEIGHT;
       currentMode = MODE_ALT_HOLD;
-      Serial.println(F("✅ Takeoff complete, entering ALT HOLD"));
+      Serial.println(F("✅ Takeoff complete, entering ALT HOLD at 150cm"));
+      beep(2);
     }
     return;
   }
   
   if (currentMode == MODE_LANDING) {
     float elapsed = currentTime - landingStartTime;
+    float initialAltitude = targetAltitude;
     
-    if (elapsed < LANDING_DURATION) {
-      // Gradually decrease target altitude
-      targetAltitude = TAKEOFF_HEIGHT * (1.0 - elapsed / LANDING_DURATION);
-    } else {
-      // Landing complete, disarm
-      armed = false;
-      currentMode = MODE_ANGLE;
-      Serial.println(F("✅ Landing complete, DISARMED"));
-      beep(3);
-      return;
+    // SMOOTH landing: Gradually decrease altitude over 4 seconds
+    if (elapsed < 4000) {
+      // Smooth descent with S-curve
+      float progress = elapsed / 4000.0;
+      float smoothProgress = progress * progress * (3.0 - 2.0 * progress);
+      targetAltitude = initialAltitude * (1.0 - smoothProgress);
+      
+      // Slower descent near ground
+      if (targetAltitude < 30) {
+        targetAltitude = max(0, targetAltitude * 0.5);
+      }
+      
+      // Debug output
+      if ((int)elapsed % 500 == 0) {
+        Serial.print(F("Landing: "));
+        Serial.print(targetAltitude, 0);
+        Serial.print(F("cm (current: "));
+        Serial.print(currentAltitude, 0);
+        Serial.println(F("cm)"));
+      }
     }
     
-    // Auto-disarm at 10cm
-    if (currentAltitude < 10) {
+    // Auto-disarm when very close to ground
+    if (currentAltitude < 15 || targetAltitude < 5) {
       armed = false;
       currentMode = MODE_ANGLE;
       Serial.println(F("✅ Landing complete, DISARMED"));
@@ -743,22 +824,29 @@ void calculatePID() {
   motorRR_speed = baseThrottle + pidPitch - pidRoll - pidYaw;
   motorRL_speed = baseThrottle + pidPitch + pidRoll + pidYaw;
   
+  // ═══════════════════════════════════════════════════════════════════════
+  // CRITICAL: PREVENT MOTOR CUTOFF (keeps drone stable)
+  // ═══════════════════════════════════════════════════════════════════════
+  // When drone tilts, one motor slows down but NEVER stops completely!
+  // This prevents the "FR motor stops when nose down" problem
+  
+  if (armed && baseThrottle > 1050) {
+    // Minimum motor speed = 60% of base throttle
+    // This keeps motors spinning even during aggressive tilts
+    int minMotorSpeed = baseThrottle * 0.6;
+    minMotorSpeed = max(minMotorSpeed, 1100);  // Absolute minimum 1100
+    
+    motorFL_speed = max(motorFL_speed, minMotorSpeed);
+    motorFR_speed = max(motorFR_speed, minMotorSpeed);
+    motorRR_speed = max(motorRR_speed, minMotorSpeed);
+    motorRL_speed = max(motorRL_speed, minMotorSpeed);
+  }
+  
   // Constrain to safe range
   motorFL_speed = constrain(motorFL_speed, 1000, 2000);
   motorFR_speed = constrain(motorFR_speed, 1000, 2000);
   motorRR_speed = constrain(motorRR_speed, 1000, 2000);
   motorRL_speed = constrain(motorRL_speed, 1000, 2000);
-  
-  // Airmode: Keep minimum throttle when armed (prevents motor cutoff during flips)
-  // Uncomment for advanced flying (ACRO mode)
-  /*
-  if (armed && baseThrottle > 1050) {
-    motorFL_speed = max(motorFL_speed, 1050);
-    motorFR_speed = max(motorFR_speed, 1050);
-    motorRR_speed = max(motorRR_speed, 1050);
-    motorRL_speed = max(motorRL_speed, 1050);
-  }
-  */
 }
 
 // Generic PID calculation function
