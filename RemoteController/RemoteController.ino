@@ -74,7 +74,7 @@ struct RadioPacket {
 // GLOBAL OBJECTS & VARIABLES
 // ═══════════════════════════════════════════════════════════════════════════
 RF24 radio(RADIO_CE_PIN, RADIO_CSN_PIN);
-const uint64_t radioAddress = 0xF0F0F0F0E1LL;
+const uint64_t radioAddress = 0xE8E8F0F0E1LL;  // MUST match FC!
 
 RadioPacket txData;
 

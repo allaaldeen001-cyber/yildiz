@@ -137,8 +137,8 @@ Servo motorFL, motorFR, motorRR, motorRL;
 // GLOBAL VARIABLES
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Radio
-const uint64_t radioAddress = 0xF0F0F0F0E1LL;
+// Radio (MUST match your working code!)
+const uint64_t radioAddress = 0xE8E8F0F0E1LL;
 RadioPacket rcData;
 unsigned long lastRadioTime = 0;
 bool radioConnected = false;

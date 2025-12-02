@@ -1,0 +1,44 @@
+╔═══════════════════════════════════════════════════════════════╗
+║                                                               ║
+║        🔧 QUICK FIX: ADDRESS MISMATCH - UPLOAD AGAIN! 🔧      ║
+║                                                               ║
+╚═══════════════════════════════════════════════════════════════╝
+
+PROBLEM FOUND!
+═══════════════════════════════════════════════════════════════
+
+Your working code uses:
+  0xE8E8F0F0E1LL  ← Correct address
+
+My code had:
+  0xF0F0F0F0E1LL  ← Wrong address!
+
+They were using DIFFERENT addresses, so no communication!
+
+FIXED NOW!
+═══════════════════════════════════════════════════════════════
+
+Both files changed to:
+  const uint64_t radioAddress = 0xE8E8F0F0E1LL;
+
+UPLOAD BOTH AGAIN:
+═══════════════════════════════════════════════════════════════
+
+1. FlightController/FlightController.ino → Upload to FC
+2. RemoteController/RemoteController.ino → Upload to RC
+
+EXPECTED AFTER FIX:
+═══════════════════════════════════════════════════════════════
+
+RC Serial:
+  ✅ Radio initialized
+  TX: ✅ OK | Throttle:485 | Yaw:0 | Pitch:0 | Roll:0
+
+FC Serial:
+  ✅ Radio initialized
+  Listening on pipe 1, address: 0xE8E8F0F0E1  ← Should match now!
+  RC:OK | Roll:0.0 | Pitch:0.0
+
+═══════════════════════════════════════════════════════════════
+
+UPLOAD NOW AND TEST! Should work immediately! ✅
