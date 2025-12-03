@@ -445,19 +445,19 @@ void computePID() {
         targetAlt = held;
       }
       float altCorr = pidCompute(&pidAlt, targetAlt, sen.altitude, deltaTime);
-      baseThr = 1500 + altCorr;
-      baseThr = constrain(baseThr, 1100, 1900);
+      baseThr = 1400 + altCorr;  // REDUCED hover point (was 1500)
+      baseThr = constrain(baseThr, 1100, 1700);  // REDUCED max (was 1900)
     } else {
-      baseThr = map(rcData.throttle, 0, 1000, 1000, 2000);
+      baseThr = map(rcData.throttle, 0, 1000, 1000, 1700);  // REDUCED max throttle (was 2000)
     }
   } else {
-    baseThr = map(rcData.throttle, 0, 1000, 1000, 2000);
+    baseThr = map(rcData.throttle, 0, 1000, 1000, 1700);  // REDUCED max throttle (was 2000)
   }
   
   // Attitude control
   if (mode == M_ANGLE || mode == M_ALT || mode == M_LAND || mode == M_TO) {
     float tgtRollAng = map(rcData.roll, -500, 500, -MAX_ANGLE, MAX_ANGLE);
-    float tgtPitchAng = map(rcData.pitch, -500, 500, -MAX_ANGLE, MAX_ANGLE);
+    float tgtPitchAng = map(rcData.pitch, -500, 500, MAX_ANGLE, -MAX_ANGLE);  // INVERTED (joystick up = forward)
     if (mode == M_LAND) {
       tgtRollAng = constrain(tgtRollAng, -LAND_MAX_TILT, LAND_MAX_TILT);
       tgtPitchAng = constrain(tgtPitchAng, -LAND_MAX_TILT, LAND_MAX_TILT);
@@ -468,7 +468,7 @@ void computePID() {
     pitchRateSp = constrain(pitchRateSp, -400, 400);
   } else {
     rollRateSp = map(rcData.roll, -500, 500, -400, 400);
-    pitchRateSp = map(rcData.pitch, -500, 500, -400, 400);
+    pitchRateSp = map(rcData.pitch, -500, 500, 400, -400);  // INVERTED (joystick up = forward)
   }
   yawRateSp = map(rcData.yaw, -500, 500, -200, 200);
   
@@ -569,10 +569,11 @@ void calibrateAlt() {
 void motorTest() {
   beep(1);
   delay(500);
-  mFL.writeMicroseconds(1150); delay(2000); mFL.writeMicroseconds(1000); delay(500);
-  mFR.writeMicroseconds(1150); delay(2000); mFR.writeMicroseconds(1000); delay(500);
-  mRR.writeMicroseconds(1150); delay(2000); mRR.writeMicroseconds(1000); delay(500);
-  mRL.writeMicroseconds(1150); delay(2000); mRL.writeMicroseconds(1000);
+  // LOW SPEED TEST (1120 instead of 1150) for RS2205 2300KV
+  mFL.writeMicroseconds(1120); delay(2000); mFL.writeMicroseconds(1000); delay(500);
+  mFR.writeMicroseconds(1120); delay(2000); mFR.writeMicroseconds(1000); delay(500);
+  mRR.writeMicroseconds(1120); delay(2000); mRR.writeMicroseconds(1000); delay(500);
+  mRL.writeMicroseconds(1120); delay(2000); mRL.writeMicroseconds(1000);
   beep(2);
 }
 
