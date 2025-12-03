@@ -1,15 +1,12 @@
 /*
- * ═══════════════════════════════════════════════════════════════════════════
- * PROFESSIONAL QUADCOPTER FLIGHT CONTROLLER - OPTIMIZED
- * Smooth Landing System v2.0
- * ═══════════════════════════════════════════════════════════════════════════
- * 
- * WIRING: MPU6050(I2C:A4/A5), MS5611(I2C:A4/A5), NRF24(CE:D4,CSN:D10)
- *         Motors(FL:D3,FR:D5,RR:D6,RL:D9), Buzzer:D8, LED:D7
- * 
- * I2C: MPU6050=0x68, MS5611=0x77
- * Libraries: Adafruit_MPU6050, MS5611, RF24, Wire, SPI, Servo
- * ═══════════════════════════════════════════════════════════════════════════
+ * ============================================================================
+ * PROFESSIONAL QUADCOPTER FLIGHT CONTROLLER
+ * MPU6050 Stabilization System
+ * ============================================================================
+ * Hardware: Arduino Nano, MPU6050, NRF24L01+, 4x ESC, RS2205 2300KV
+ * Wiring: MPU(A4/A5), NRF(CE:D4,CSN:D10), Motors(D3,D5,D6,D9), LED:D7, Buzzer:D8
+ * Motors: FL(D3,CCW), FR(D5,CW), RR(D6,CCW), RL(D9,CW)
+ * ============================================================================
  */
 
 #include <Wire.h>
@@ -17,520 +14,482 @@
 #include <Servo.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
-#include <MS5611.h>
 #include <nRF24L01.h>
 #include <RF24.h>
 
-// Pins
-#define RADIO_CE 4
-#define RADIO_CSN 10
-#define MOTOR_FL 3
-#define MOTOR_FR 5
-#define MOTOR_RR 6
-#define MOTOR_RL 9
-#define BUZZER 8
-#define LED 7
+// ============================================================================
+// PIN CONFIGURATION
+// ============================================================================
+#define RADIO_CE    4
+#define RADIO_CSN   10
+#define MOTOR_FL    3
+#define MOTOR_FR    5
+#define MOTOR_RR    6
+#define MOTOR_RL    9
+#define BUZZER      8
+#define LED         7
 
-// PID - Rate
-#define RATE_ROLL_KP 0.65f
-#define RATE_ROLL_KI 0.35f
-#define RATE_ROLL_KD 0.018f
-#define RATE_ROLL_MAXI 150.0f
+// ============================================================================
+// PID TUNING (RS2205 2300KV optimized)
+// ============================================================================
+// Rate PID (inner loop)
+#define RATE_ROLL_KP    0.60f
+#define RATE_ROLL_KI    0.30f
+#define RATE_ROLL_KD    0.020f
+#define RATE_ROLL_MAXI  120.0f
 
-#define RATE_PITCH_KP 0.65f
-#define RATE_PITCH_KI 0.35f
-#define RATE_PITCH_KD 0.018f
-#define RATE_PITCH_MAXI 150.0f
+#define RATE_PITCH_KP   0.60f
+#define RATE_PITCH_KI   0.30f
+#define RATE_PITCH_KD   0.020f
+#define RATE_PITCH_MAXI 120.0f
 
-#define YAW_KP 0.8f
-#define YAW_KI 0.3f
-#define YAW_KD 0.005f
-#define YAW_MAXI 100.0f
+#define YAW_KP          0.70f
+#define YAW_KI          0.25f
+#define YAW_KD          0.005f
+#define YAW_MAXI        80.0f
 
-// PID - Angle
-#define ANGLE_KP 4.0f
+// Angle PID (outer loop)
+#define ANGLE_ROLL_KP   3.5f
+#define ANGLE_PITCH_KP  3.5f
 
-// PID - Altitude
-#define ALT_KP 4.5f
-#define ALT_KI 0.15f
-#define ALT_KD 3.5f
-#define ALT_MAXI 200.0f
+// ============================================================================
+// FLIGHT PARAMETERS
+// ============================================================================
+#define MAX_ANGLE       40.0f   // Maximum tilt angle (degrees)
+#define GYRO_WEIGHT     0.98f   // Complementary filter (98% gyro, 2% accel)
+#define MOTOR_MIN       1000
+#define MOTOR_MAX       1700    // LIMITED for RS2205 2300KV (85% power)
+#define MOTOR_ARM_MIN   1100
+#define RADIO_TIMEOUT   1000    // Radio failsafe timeout (ms)
+#define LOOP_FREQ       250     // Control loop frequency (Hz)
+#define LOOP_TIME       4000    // Loop time (microseconds)
 
-// Landing
-#define LAND_DESC_MAX 50.0f
-#define LAND_TD_ALT 15.0f
-#define LAND_IDLE_THR 1100
-#define LAND_SAFE_THR 1050
-#define LAND_MAX_TILT 15.0f
-#define LAND_VEL_THR 10.0f
-
-// Takeoff
-#define TO_ALT 150.0f
-#define TO_RATE 30.0f
-
-// Safety
-#define MAX_ANGLE 45.0f
-#define RADIO_TIMEOUT 1000
-#define GYRO_WEIGHT 0.98f
-#define MOTOR_MIN 1000
-#define MOTOR_MAX 2000
-#define MOTOR_ARM_MIN 1100
-
-// Radio packet
+// ============================================================================
+// DATA STRUCTURES
+// ============================================================================
 struct RadioPacket {
   uint16_t throttle;
   int16_t roll, pitch, yaw;
   uint8_t sw1, sw2, btn1, btn2, btn3, btn4;
 };
 
-// PID
 struct PID {
-  float Kp, Ki, Kd, maxI, integral, lastErr, output;
+  float Kp, Ki, Kd, maxI;
+  float integral, lastErr, output;
 };
 
-// Sensor data
-struct Sensors {
-  float accelX, accelY, accelZ;
-  float gyroX, gyroY, gyroZ;
-  float pressure, altitude, temperature;
-  unsigned long lastMPU, lastBaro;
-  bool mpuValid, baroValid;
-};
-
-// Attitude
 struct Attitude {
   float roll, pitch, yaw;
   float rollRate, pitchRate, yawRate;
 };
 
-// Landing states
-enum LandState {
-  LS_IDLE, LS_INIT, LS_DESC, LS_NEAR, LS_TD, LS_SAFE, LS_DONE
-};
-
-// Flight modes
 enum FlightMode {
-  M_DISARM, M_ANGLE, M_ACRO, M_ALT, M_LAND, M_TO
+  MODE_DISARM = 0,
+  MODE_ANGLE  = 1,
+  MODE_ACRO   = 2
 };
 
-// Objects
+// ============================================================================
+// GLOBAL OBJECTS
+// ============================================================================
 Adafruit_MPU6050 mpu;
-MS5611 ms5611;
 RF24 radio(RADIO_CE, RADIO_CSN);
 Servo mFL, mFR, mRR, mRL;
 
-// Globals
+// ============================================================================
+// GLOBAL VARIABLES
+// ============================================================================
 const uint64_t radioAddr = 0xE8E8F0F0E1LL;
 RadioPacket rcData;
-Sensors sen;
 Attitude att;
-PID pidRateRoll, pidRatePitch, pidYaw, pidAngleRoll, pidAnglePitch, pidAlt;
-FlightMode mode = M_DISARM;
-LandState landState = LS_IDLE;
+PID pidRateRoll, pidRatePitch, pidYaw;
+PID pidAngleRoll, pidAnglePitch;
+FlightMode mode = MODE_DISARM;
 
 bool armed = false;
-unsigned long lastRadio = 0, currentTime = 0, prevTime = 0;
-float deltaTime = 0, groundRef = 0, lastAlt = 0, vertVel = 0;
-float landStartAlt = 0, toStartAlt = 0, targetDescRate = 0;
-unsigned long landStartTime = 0, toStartTime = 0, lastAltTime = 0;
-bool groundRefSet = false, baroFailsafe = false, mpuFailsafe = false;
-int mFL_spd = 1000, mFR_spd = 1000, mRR_spd = 1000, mRL_spd = 1000;
-uint8_t lastBtn1 = HIGH, lastBtn2 = HIGH, lastBtn3 = HIGH, lastBtn4 = HIGH;
-float gyroXOff = 0, gyroYOff = 0, gyroZOff = 0, altOff = 0;
+bool radioOK = false;
+unsigned long lastRadio = 0;
+unsigned long currentTime = 0;
+unsigned long prevTime = 0;
+float deltaTime = 0;
 
+int mFL_spd = 1000, mFR_spd = 1000, mRR_spd = 1000, mRL_spd = 1000;
+uint8_t lastBtn1 = HIGH, lastBtn2 = HIGH;
+
+float gyroXOff = 0, gyroYOff = 0, gyroZOff = 0;
+float accelX = 0, accelY = 0, accelZ = 0;
+float gyroX = 0, gyroY = 0, gyroZ = 0;
+
+// ============================================================================
+// SETUP
+// ============================================================================
 void setup() {
   Serial.begin(115200);
+  
   pinMode(LED, OUTPUT);
   pinMode(BUZZER, OUTPUT);
   digitalWrite(LED, LOW);
   
+  Serial.println(F("Flight Controller v2.0"));
+  Serial.println(F("Initializing..."));
+  
+  // Initialize I2C
   Wire.begin();
   Wire.setClock(400000);
   
+  // Initialize MPU6050
   if (!mpu.begin()) {
-    Serial.println(F("MPU FAIL"));
+    Serial.println(F("ERROR: MPU6050 not found"));
     failsafe();
   }
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
   mpu.setGyroRange(MPU6050_RANGE_500_DEG);
   mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+  Serial.println(F("MPU6050: OK"));
   
-  if (!ms5611.begin()) {
-    Serial.println(F("BARO FAIL"));
-    baroFailsafe = true;
-  } else {
-    ms5611.setOversampling(OSR_STANDARD);
-  }
-  
+  // Initialize Radio
   if (!radio.begin()) {
-    Serial.println(F("RADIO FAIL"));
+    Serial.println(F("ERROR: NRF24L01 not found"));
     failsafe();
   }
-  radio.setChannel(108);
-  radio.setDataRate(RF24_250KBPS);
+  
   radio.setPALevel(RF24_PA_MAX);
+  radio.setDataRate(RF24_250KBPS);
+  radio.setChannel(108);
+  radio.setPayloadSize(sizeof(RadioPacket));
   radio.setAutoAck(true);
-  radio.enableAckPayload();
+  radio.setRetries(5, 15);
   radio.enableDynamicPayloads();
+  radio.enableAckPayload();
   radio.openReadingPipe(1, radioAddr);
   radio.startListening();
   
+  Serial.println(F("NRF24L01: OK"));
+  Serial.print(F("Address: 0x"));
+  Serial.println((unsigned long)(radioAddr & 0xFFFFFFFF), HEX);
+  
+  // Initialize Motors
   mFL.attach(MOTOR_FL);
   mFR.attach(MOTOR_FR);
   mRR.attach(MOTOR_RR);
   mRL.attach(MOTOR_RL);
+  
   mFL.writeMicroseconds(1000);
   mFR.writeMicroseconds(1000);
   mRR.writeMicroseconds(1000);
   mRL.writeMicroseconds(1000);
+  Serial.println(F("ESCs: OK"));
+  
   delay(1000);
   
+  // Initialize PID
   initPID();
+  Serial.println(F("PID: OK"));
   
-  Serial.println(F("CAL..."));
+  // Calibrate Gyro
+  Serial.println(F("Calibrating gyro (keep level)..."));
   delay(500);
   calibrateGyro();
-  calibrateAlt();
   
-  Serial.println(F("READY"));
+  Serial.println(F(""));
+  Serial.println(F("READY - Waiting for radio..."));
   beep(2);
+  
+  prevTime = micros();
 }
 
+// ============================================================================
+// MAIN LOOP (250Hz)
+// ============================================================================
 void loop() {
   currentTime = micros();
   
-  if (currentTime - prevTime >= 4000) {
+  if (currentTime - prevTime >= LOOP_TIME) {
     deltaTime = (currentTime - prevTime) / 1000000.0f;
     prevTime = currentTime;
     
+    // Step 1: Read sensors
     readMPU();
-    readBaro();
-    updateAtt();
+    
+    // Step 2: Update attitude (sensor fusion)
+    updateAttitude();
+    
+    // Step 3: Read radio
     readRadio();
+    
+    // Step 4: Update flight mode
     updateMode();
+    
+    // Step 5: Handle buttons
     handleButtons();
     
-    if (mode == M_LAND) updateLanding();
-    
+    // Step 6: Compute PID
     computePID();
+    
+    // Step 7: Mix and limit motors
     mixMotors();
+    
+    // Step 8: Update motors
     updateMotors();
+    
+    // Step 9: Update LED
     updateLED();
+    
+    // Debug output (every 250ms)
+    static unsigned long lastDebug = 0;
+    if (millis() - lastDebug > 250) {
+      printStatus();
+      lastDebug = millis();
+    }
   }
 }
 
+// ============================================================================
+// PID INITIALIZATION
+// ============================================================================
 void initPID() {
-  pidRateRoll.Kp = RATE_ROLL_KP; pidRateRoll.Ki = RATE_ROLL_KI; pidRateRoll.Kd = RATE_ROLL_KD; pidRateRoll.maxI = RATE_ROLL_MAXI;
-  pidRatePitch.Kp = RATE_PITCH_KP; pidRatePitch.Ki = RATE_PITCH_KI; pidRatePitch.Kd = RATE_PITCH_KD; pidRatePitch.maxI = RATE_PITCH_MAXI;
-  pidYaw.Kp = YAW_KP; pidYaw.Ki = YAW_KI; pidYaw.Kd = YAW_KD; pidYaw.maxI = YAW_MAXI;
-  pidAngleRoll.Kp = ANGLE_KP;
-  pidAnglePitch.Kp = ANGLE_KP;
-  pidAlt.Kp = ALT_KP; pidAlt.Ki = ALT_KI; pidAlt.Kd = ALT_KD; pidAlt.maxI = ALT_MAXI;
+  pidRateRoll.Kp = RATE_ROLL_KP;
+  pidRateRoll.Ki = RATE_ROLL_KI;
+  pidRateRoll.Kd = RATE_ROLL_KD;
+  pidRateRoll.maxI = RATE_ROLL_MAXI;
+  
+  pidRatePitch.Kp = RATE_PITCH_KP;
+  pidRatePitch.Ki = RATE_PITCH_KI;
+  pidRatePitch.Kd = RATE_PITCH_KD;
+  pidRatePitch.maxI = RATE_PITCH_MAXI;
+  
+  pidYaw.Kp = YAW_KP;
+  pidYaw.Ki = YAW_KI;
+  pidYaw.Kd = YAW_KD;
+  pidYaw.maxI = YAW_MAXI;
+  
+  pidAngleRoll.Kp = ANGLE_ROLL_KP;
+  pidAnglePitch.Kp = ANGLE_PITCH_KP;
 }
 
+// ============================================================================
+// SENSOR READING
+// ============================================================================
 void readMPU() {
   sensors_event_t a, g, temp;
+  
   if (!mpu.getEvent(&a, &g, &temp)) {
-    sen.mpuValid = false;
+    Serial.println(F("MPU read fail"));
     return;
   }
-  sen.accelX = a.acceleration.x;
-  sen.accelY = a.acceleration.y;
-  sen.accelZ = a.acceleration.z;
-  sen.gyroX = g.gyro.x - gyroXOff;
-  sen.gyroY = g.gyro.y - gyroYOff;
-  sen.gyroZ = g.gyro.z - gyroZOff;
-  sen.lastMPU = millis();
-  sen.mpuValid = true;
+  
+  accelX = a.acceleration.x;
+  accelY = a.acceleration.y;
+  accelZ = a.acceleration.z;
+  
+  gyroX = g.gyro.x - gyroXOff;
+  gyroY = g.gyro.y - gyroYOff;
+  gyroZ = g.gyro.z - gyroZOff;
 }
 
-void readBaro() {
-  static unsigned long lastRead = 0;
-  if (millis() - lastRead < 20 || baroFailsafe) return;
-  lastRead = millis();
+// ============================================================================
+// ATTITUDE ESTIMATION (Complementary Filter)
+// ============================================================================
+void updateAttitude() {
+  // Calculate angles from accelerometer
+  float accelRoll = atan2(accelY, accelZ) * 57.2958f;
+  float accelPitch = atan2(-accelX, sqrt(accelY * accelY + accelZ * accelZ)) * 57.2958f;
   
-  if (ms5611.read() == MS5611_READ_OK) {
-    sen.pressure = ms5611.getPressure();
-    sen.altitude = 44330.0f * (1.0f - pow(sen.pressure / 1013.25f, 0.1903f)) * 100.0f - altOff;
-    sen.lastBaro = millis();
-    sen.baroValid = true;
-    
-    if (lastAltTime > 0) {
-      float dt = (millis() - lastAltTime) / 1000.0f;
-      if (dt > 0) {
-        vertVel = (sen.altitude - lastAlt) / dt;
-        static float filt = 0;
-        filt = 0.8f * filt + 0.2f * vertVel;
-        vertVel = filt;
-      }
-    }
-    lastAlt = sen.altitude;
-    lastAltTime = millis();
-  }
-}
-
-void updateAtt() {
-  if (!sen.mpuValid) return;
+  // Convert gyro to deg/s
+  att.rollRate = gyroX * 57.2958f;
+  att.pitchRate = gyroY * 57.2958f;
+  att.yawRate = gyroZ * 57.2958f;
   
-  float accelRoll = atan2(sen.accelY, sen.accelZ) * 57.2958f;
-  float accelPitch = atan2(-sen.accelX, sqrt(sen.accelY * sen.accelY + sen.accelZ * sen.accelZ)) * 57.2958f;
-  
-  att.rollRate = sen.gyroX * 57.2958f;
-  att.pitchRate = sen.gyroY * 57.2958f;
-  att.yawRate = sen.gyroZ * 57.2958f;
-  
+  // Complementary filter (98% gyro, 2% accel)
   att.roll = GYRO_WEIGHT * (att.roll + att.rollRate * deltaTime) + (1.0f - GYRO_WEIGHT) * accelRoll;
   att.pitch = GYRO_WEIGHT * (att.pitch + att.pitchRate * deltaTime) + (1.0f - GYRO_WEIGHT) * accelPitch;
   att.yaw += att.yawRate * deltaTime;
   
+  // Limit angles
   att.roll = constrain(att.roll, -MAX_ANGLE, MAX_ANGLE);
   att.pitch = constrain(att.pitch, -MAX_ANGLE, MAX_ANGLE);
 }
 
+// ============================================================================
+// RADIO COMMUNICATION
+// ============================================================================
 void readRadio() {
   if (radio.available()) {
     radio.read(&rcData, sizeof(RadioPacket));
     lastRadio = millis();
-  } else if (millis() - lastRadio > RADIO_TIMEOUT) {
-    armed = false;
-    mode = M_DISARM;
-    landState = LS_IDLE;
-  }
-}
-
-void updateMode() {
-  if (mode == M_LAND) return;
-  if (mode == M_TO && sen.altitude >= TO_ALT) {
-    mode = M_ALT;
-    beep(2);
-    return;
-  }
-  if (!armed) {
-    mode = M_DISARM;
-    return;
-  }
-  if (rcData.sw1 == HIGH) {
-    mode = (rcData.sw2 == HIGH) ? M_ANGLE : M_ACRO;
+    
+    if (!radioOK) {
+      radioOK = true;
+      Serial.println(F("Radio connected"));
+      beep(1);
+    }
   } else {
-    mode = M_ALT;
+    // Check for timeout
+    if (radioOK && (millis() - lastRadio > RADIO_TIMEOUT)) {
+      radioOK = false;
+      armed = false;
+      mode = MODE_DISARM;
+      Serial.println(F("Radio lost - FAILSAFE"));
+      beep(5);
+    }
   }
 }
 
+// ============================================================================
+// FLIGHT MODE MANAGEMENT
+// ============================================================================
+void updateMode() {
+  if (!armed || !radioOK) {
+    mode = MODE_DISARM;
+    return;
+  }
+  
+  // SW2: ANGLE (auto-level) or ACRO (rate mode)
+  if (rcData.sw2 == HIGH) {
+    mode = MODE_ANGLE;
+  } else {
+    mode = MODE_ACRO;
+  }
+}
+
+// ============================================================================
+// BUTTON HANDLING
+// ============================================================================
 void handleButtons() {
+  if (!radioOK) return;
+  
+  // Button 1: Calibrate gyro (also disarms)
   if (rcData.btn1 == LOW && lastBtn1 == HIGH) {
     armed = false;
-    mode = M_DISARM;
+    mode = MODE_DISARM;
+    Serial.println(F("Calibrating..."));
     calibrateGyro();
-    calibrateAlt();
+    Serial.println(F("Calibration complete"));
     beep(2);
   }
   lastBtn1 = rcData.btn1;
   
-  if (rcData.btn2 == LOW && lastBtn2 == HIGH && !armed) motorTest();
-  lastBtn2 = rcData.btn2;
-  
-  if (rcData.btn3 == LOW && lastBtn3 == HIGH && armed) {
-    mode = M_LAND;
-    landState = LS_INIT;
-    landStartTime = millis();
-    landStartAlt = sen.altitude;
-    if (!groundRefSet || baroFailsafe) groundRef = 0;
-    beep(1);
-  }
-  lastBtn3 = rcData.btn3;
-  
-  if (rcData.btn4 == LOW && lastBtn4 == HIGH && !armed) {
-    if (baroFailsafe) {
-      beep(5);
-      return;
+  // Button 2: Arm/Disarm toggle
+  if (rcData.btn2 == LOW && lastBtn2 == HIGH) {
+    armed = !armed;
+    
+    if (armed) {
+      Serial.println(F("ARMED"));
+      beep(1);
+    } else {
+      Serial.println(F("DISARMED"));
+      mode = MODE_DISARM;
+      beep(2);
     }
-    armed = true;
-    mode = M_TO;
-    toStartTime = millis();
-    toStartAlt = sen.altitude;
-    groundRef = sen.altitude;
-    groundRefSet = true;
-    beep(1);
   }
-  lastBtn4 = rcData.btn4;
+  lastBtn2 = rcData.btn2;
 }
 
-void updateLanding() {
-  float agl = sen.altitude - groundRef;
-  float elapsed = (millis() - landStartTime) / 1000.0f;
+// ============================================================================
+// PID COMPUTATION
+// ============================================================================
+float pidCompute(PID* p, float setpoint, float measurement, float dt) {
+  float error = setpoint - measurement;
   
-  switch (landState) {
-    case LS_INIT:
-      landState = LS_DESC;
-      break;
-      
-    case LS_DESC:
-      if (!baroFailsafe && sen.baroValid) {
-        float prog = min(1.0f, elapsed / 5.0f);
-        float smooth = 3.0f * prog * prog - 2.0f * prog * prog * prog;
-        targetDescRate = LAND_DESC_MAX * smooth;
-        if (agl < 50.0f) landState = LS_NEAR;
-      } else {
-        targetDescRate = LAND_DESC_MAX * 0.3f;
-        if (elapsed > 10.0f) landState = LS_NEAR;
-      }
-      break;
-      
-    case LS_NEAR:
-      targetDescRate = LAND_DESC_MAX * 0.3f;
-      if ((agl < LAND_TD_ALT && abs(vertVel) < LAND_VEL_THR) || 
-          sen.accelZ > 11.0f || baroFailsafe) {
-        landState = LS_TD;
-        groundRef = sen.altitude;
-        groundRefSet = true;
-      }
-      break;
-      
-    case LS_TD:
-      if (elapsed > 1.0f) landState = LS_SAFE;
-      break;
-      
-    case LS_SAFE:
-      {
-        static unsigned long safeStart = millis();
-        if (millis() - safeStart > 500) landState = LS_DONE;
-      }
-      break;
-      
-    case LS_DONE:
-      armed = false;
-      mode = M_DISARM;
-      landState = LS_IDLE;
-      beep(3);
-      break;
-  }
-}
-
-float pidCompute(PID* p, float sp, float pv, float dt) {
-  float err = sp - pv;
-  float P = p->Kp * err;
-  p->integral += err * dt;
+  // Proportional
+  float P = p->Kp * error;
+  
+  // Integral (with anti-windup)
+  p->integral += error * dt;
   p->integral = constrain(p->integral, -p->maxI, p->maxI);
   float I = p->Ki * p->integral;
-  float D = p->Kd * (err - p->lastErr) / dt;
-  p->lastErr = err;
+  
+  // Derivative
+  float D = p->Kd * (error - p->lastErr) / dt;
+  p->lastErr = error;
+  
   p->output = P + I + D;
   return p->output;
 }
 
 void computePID() {
   if (!armed) {
-    resetPID(&pidRateRoll); resetPID(&pidRatePitch); resetPID(&pidYaw);
-    resetPID(&pidAngleRoll); resetPID(&pidAnglePitch); resetPID(&pidAlt);
+    resetPID(&pidRateRoll);
+    resetPID(&pidRatePitch);
+    resetPID(&pidYaw);
+    resetPID(&pidAngleRoll);
+    resetPID(&pidAnglePitch);
     return;
   }
   
-  float rollRateSp = 0, pitchRateSp = 0, yawRateSp = 0, baseThr = 0;
+  float rollRateSetpoint, pitchRateSetpoint, yawRateSetpoint;
+  float baseThrottle;
   
-  // Altitude control
-  if (mode == M_ALT || mode == M_LAND || mode == M_TO) {
-    if (!baroFailsafe && sen.baroValid) {
-      float targetAlt = 0;
-      if (mode == M_LAND) {
-        targetAlt = landStartAlt - (targetDescRate * ((millis() - landStartTime) / 1000.0f));
-        targetAlt = max(targetAlt, groundRef + LAND_TD_ALT);
-      } else if (mode == M_TO) {
-        float e = (millis() - toStartTime) / 1000.0f;
-        targetAlt = toStartAlt + (TO_RATE * e);
-        targetAlt = min(targetAlt, TO_ALT);
-      } else {
-        static float held = sen.altitude;
-        held += (rcData.throttle - 500) * 0.02f * deltaTime;
-        held = constrain(held, 50, 500);
-        targetAlt = held;
-      }
-      float altCorr = pidCompute(&pidAlt, targetAlt, sen.altitude, deltaTime);
-      baseThr = 1400 + altCorr;  // REDUCED hover point (was 1500)
-      baseThr = constrain(baseThr, 1100, 1700);  // REDUCED max (was 1900)
-    } else {
-      baseThr = map(rcData.throttle, 0, 1000, 1000, 1700);  // REDUCED max throttle (was 2000)
-    }
-  } else {
-    baseThr = map(rcData.throttle, 0, 1000, 1000, 1700);  // REDUCED max throttle (was 2000)
-  }
+  // Map throttle (0-1000 -> 1000-1700us)
+  baseThrottle = map(rcData.throttle, 0, 1000, 1000, MOTOR_MAX);
+  baseThrottle = constrain(baseThrottle, 1000, MOTOR_MAX);
   
   // Attitude control
-  if (mode == M_ANGLE || mode == M_ALT || mode == M_LAND || mode == M_TO) {
-    float tgtRollAng = map(rcData.roll, -500, 500, -MAX_ANGLE, MAX_ANGLE);
-    float tgtPitchAng = map(rcData.pitch, -500, 500, MAX_ANGLE, -MAX_ANGLE);  // INVERTED (joystick up = forward)
-    if (mode == M_LAND) {
-      tgtRollAng = constrain(tgtRollAng, -LAND_MAX_TILT, LAND_MAX_TILT);
-      tgtPitchAng = constrain(tgtPitchAng, -LAND_MAX_TILT, LAND_MAX_TILT);
-    }
-    rollRateSp = pidCompute(&pidAngleRoll, tgtRollAng, att.roll, deltaTime);
-    pitchRateSp = pidCompute(&pidAnglePitch, tgtPitchAng, att.pitch, deltaTime);
-    rollRateSp = constrain(rollRateSp, -400, 400);
-    pitchRateSp = constrain(pitchRateSp, -400, 400);
+  if (mode == MODE_ANGLE) {
+    // ANGLE MODE: Stick controls angle
+    float targetRollAngle = map(rcData.roll, -500, 500, -MAX_ANGLE, MAX_ANGLE);
+    float targetPitchAngle = map(rcData.pitch, -500, 500, MAX_ANGLE, -MAX_ANGLE);  // INVERTED
+    
+    // Outer loop: Angle PID (outputs rate setpoint)
+    rollRateSetpoint = pidCompute(&pidAngleRoll, targetRollAngle, att.roll, deltaTime);
+    pitchRateSetpoint = pidCompute(&pidAnglePitch, targetPitchAngle, att.pitch, deltaTime);
+    
+    rollRateSetpoint = constrain(rollRateSetpoint, -400, 400);
+    pitchRateSetpoint = constrain(pitchRateSetpoint, -400, 400);
+    
   } else {
-    rollRateSp = map(rcData.roll, -500, 500, -400, 400);
-    pitchRateSp = map(rcData.pitch, -500, 500, 400, -400);  // INVERTED (joystick up = forward)
+    // ACRO MODE: Stick controls rate directly
+    rollRateSetpoint = map(rcData.roll, -500, 500, -400, 400);
+    pitchRateSetpoint = map(rcData.pitch, -500, 500, 400, -400);  // INVERTED
   }
-  yawRateSp = map(rcData.yaw, -500, 500, -200, 200);
   
-  float pidRoll = pidCompute(&pidRateRoll, rollRateSp, att.rollRate, deltaTime);
-  float pidPitch = pidCompute(&pidRatePitch, pitchRateSp, att.pitchRate, deltaTime);
-  float pidYawOut = pidCompute(&pidYaw, yawRateSp, att.yawRate, deltaTime);
+  // Yaw (always rate control)
+  yawRateSetpoint = map(rcData.yaw, -500, 500, -200, 200);
   
-  mFL_spd = baseThr - pidPitch + pidRoll - pidYawOut;
-  mFR_spd = baseThr - pidPitch - pidRoll + pidYawOut;
-  mRR_spd = baseThr + pidPitch - pidRoll - pidYawOut;
-  mRL_spd = baseThr + pidPitch + pidRoll + pidYawOut;
+  // Inner loop: Rate PID
+  float pidRollOut = pidCompute(&pidRateRoll, rollRateSetpoint, att.rollRate, deltaTime);
+  float pidPitchOut = pidCompute(&pidRatePitch, pitchRateSetpoint, att.pitchRate, deltaTime);
+  float pidYawOut = pidCompute(&pidYaw, yawRateSetpoint, att.yawRate, deltaTime);
+  
+  // Motor mixing (X-configuration)
+  mFL_spd = baseThrottle - pidPitchOut + pidRollOut - pidYawOut;
+  mFR_spd = baseThrottle - pidPitchOut - pidRollOut + pidYawOut;
+  mRR_spd = baseThrottle + pidPitchOut - pidRollOut - pidYawOut;
+  mRL_spd = baseThrottle + pidPitchOut + pidRollOut + pidYawOut;
 }
 
+// ============================================================================
+// MOTOR MIXING AND LIMITING
+// ============================================================================
 void mixMotors() {
-  if (!armed) {
-    mFL_spd = mFR_spd = mRR_spd = mRL_spd = 1000;
+  if (!armed || !radioOK) {
+    mFL_spd = MOTOR_MIN;
+    mFR_spd = MOTOR_MIN;
+    mRR_spd = MOTOR_MIN;
+    mRL_spd = MOTOR_MIN;
     return;
   }
   
-  if (mode == M_LAND) {
-    switch (landState) {
-      case LS_DESC:
-      case LS_NEAR:
-        applyMinThr(LAND_IDLE_THR);
-        break;
-      case LS_TD:
-        applyMinThr(LAND_SAFE_THR);
-        break;
-      case LS_SAFE:
-        mFL_spd = constrain(mFL_spd, 1000, 1050);
-        mFR_spd = constrain(mFR_spd, 1000, 1050);
-        mRR_spd = constrain(mRR_spd, 1000, 1050);
-        mRL_spd = constrain(mRL_spd, 1000, 1050);
-        break;
-      case LS_DONE:
-        mFL_spd = mFR_spd = mRR_spd = mRL_spd = 1000;
-        break;
-    }
-  } else {
-    int base = (mFL_spd + mFR_spd + mRR_spd + mRL_spd) / 4;
-    if (base > 1050) applyMinThr(MOTOR_ARM_MIN);
+  // Apply minimum throttle (prevent motor cutoff)
+  int avgThrottle = (mFL_spd + mFR_spd + mRR_spd + mRL_spd) / 4;
+  if (avgThrottle > 1050) {
+    int minThrottle = max(MOTOR_ARM_MIN, (int)(avgThrottle * 0.65f));
+    mFL_spd = max(mFL_spd, minThrottle);
+    mFR_spd = max(mFR_spd, minThrottle);
+    mRR_spd = max(mRR_spd, minThrottle);
+    mRL_spd = max(mRL_spd, minThrottle);
   }
   
-  mFL_spd = constrain(mFL_spd, 1000, 2000);
-  mFR_spd = constrain(mFR_spd, 1000, 2000);
-  mRR_spd = constrain(mRR_spd, 1000, 2000);
-  mRL_spd = constrain(mRL_spd, 1000, 2000);
+  // Final limiting
+  mFL_spd = constrain(mFL_spd, MOTOR_MIN, MOTOR_MAX);
+  mFR_spd = constrain(mFR_spd, MOTOR_MIN, MOTOR_MAX);
+  mRR_spd = constrain(mRR_spd, MOTOR_MIN, MOTOR_MAX);
+  mRL_spd = constrain(mRL_spd, MOTOR_MIN, MOTOR_MAX);
 }
 
-void applyMinThr(int minT) {
-  mFL_spd = max(mFL_spd, minT);
-  mFR_spd = max(mFR_spd, minT);
-  mRR_spd = max(mRR_spd, minT);
-  mRL_spd = max(mRL_spd, minT);
-}
-
-void resetPID(PID* p) {
-  p->integral = 0;
-  p->lastErr = 0;
-  p->output = 0;
-}
-
+// ============================================================================
+// MOTOR OUTPUT
+// ============================================================================
 void updateMotors() {
   mFL.writeMicroseconds(mFL_spd);
   mFR.writeMicroseconds(mFR_spd);
@@ -538,81 +497,74 @@ void updateMotors() {
   mRL.writeMicroseconds(mRL_spd);
 }
 
+// ============================================================================
+// CALIBRATION
+// ============================================================================
 void calibrateGyro() {
   float sumX = 0, sumY = 0, sumZ = 0;
-  for (int i = 0; i < 100; i++) {
+  
+  for (int i = 0; i < 200; i++) {
     sensors_event_t a, g, t;
     mpu.getEvent(&a, &g, &t);
     sumX += g.gyro.x;
     sumY += g.gyro.y;
     sumZ += g.gyro.z;
-    delay(10);
+    delay(5);
   }
-  gyroXOff = sumX / 100;
-  gyroYOff = sumY / 100;
-  gyroZOff = sumZ / 100;
+  
+  gyroXOff = sumX / 200.0f;
+  gyroYOff = sumY / 200.0f;
+  gyroZOff = sumZ / 200.0f;
+  
+  // Reset attitude
+  att.roll = 0;
+  att.pitch = 0;
+  att.yaw = 0;
 }
 
-void calibrateAlt() {
-  if (baroFailsafe) return;
-  float sum = 0;
-  for (int i = 0; i < 20; i++) {
-    ms5611.read();
-    sum += 44330.0f * (1.0f - pow(ms5611.getPressure() / 1013.25f, 0.1903f)) * 100.0f;
-    delay(50);
-  }
-  altOff = sum / 20;
-  groundRef = 0;
-  groundRefSet = true;
+// ============================================================================
+// UTILITIES
+// ============================================================================
+void resetPID(PID* p) {
+  p->integral = 0;
+  p->lastErr = 0;
+  p->output = 0;
 }
 
-void motorTest() {
-  beep(1);
-  delay(500);
-  // LOW SPEED TEST (1120 instead of 1150) for RS2205 2300KV
-  mFL.writeMicroseconds(1120); delay(2000); mFL.writeMicroseconds(1000); delay(500);
-  mFR.writeMicroseconds(1120); delay(2000); mFR.writeMicroseconds(1000); delay(500);
-  mRR.writeMicroseconds(1120); delay(2000); mRR.writeMicroseconds(1000); delay(500);
-  mRL.writeMicroseconds(1120); delay(2000); mRL.writeMicroseconds(1000);
-  beep(2);
-}
-
-void beep(int n) {
-  for (int i = 0; i < n; i++) {
+void beep(int count) {
+  for (int i = 0; i < count; i++) {
     digitalWrite(BUZZER, HIGH);
-    delay(100);
+    delay(80);
     digitalWrite(BUZZER, LOW);
-    delay(100);
+    delay(80);
   }
 }
 
 void updateLED() {
   static unsigned long lastBlink = 0;
   static bool state = false;
+  
   if (!armed) {
+    // Slow blink when disarmed
     if (millis() - lastBlink > 500) {
       state = !state;
       digitalWrite(LED, state);
       lastBlink = millis();
     }
-  } else if (mode == M_LAND) {
-    if (millis() - lastBlink > 100) {
-      state = !state;
-      digitalWrite(LED, state);
-      lastBlink = millis();
-    }
   } else {
+    // Solid on when armed
     digitalWrite(LED, HIGH);
   }
 }
 
 void failsafe() {
-  armed = false;
-  mode = M_DISARM;
+  Serial.println(F("CRITICAL ERROR - STOPPED"));
+  
   mFL.writeMicroseconds(1000);
   mFR.writeMicroseconds(1000);
   mRR.writeMicroseconds(1000);
   mRL.writeMicroseconds(1000);
+  
   while (1) {
     digitalWrite(LED, HIGH);
     digitalWrite(BUZZER, HIGH);
@@ -621,4 +573,43 @@ void failsafe() {
     digitalWrite(BUZZER, LOW);
     delay(200);
   }
+}
+
+void printStatus() {
+  if (!radioOK) {
+    Serial.println(F("Waiting for radio..."));
+    return;
+  }
+  
+  // Print mode
+  Serial.print(F("Mode:"));
+  if (mode == MODE_DISARM) Serial.print(F("DISARM"));
+  else if (mode == MODE_ANGLE) Serial.print(F("ANGLE"));
+  else if (mode == MODE_ACRO) Serial.print(F("ACRO"));
+  
+  // Print attitude
+  Serial.print(F(" R:"));
+  Serial.print(att.roll, 1);
+  Serial.print(F(" P:"));
+  Serial.print(att.pitch, 1);
+  
+  // Print throttle and inputs
+  Serial.print(F(" Thr:"));
+  Serial.print(rcData.throttle);
+  Serial.print(F(" In:"));
+  Serial.print(rcData.roll);
+  Serial.print(F(","));
+  Serial.print(rcData.pitch);
+  Serial.print(F(","));
+  Serial.print(rcData.yaw);
+  
+  // Print motor outputs
+  Serial.print(F(" M:"));
+  Serial.print(mFL_spd);
+  Serial.print(F(","));
+  Serial.print(mFR_spd);
+  Serial.print(F(","));
+  Serial.print(mRR_spd);
+  Serial.print(F(","));
+  Serial.println(mRL_spd);
 }
