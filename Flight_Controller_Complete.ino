@@ -226,6 +226,8 @@ Gyro gyro;
 
 Servo ESCfl, ESCfr, ESCrl, ESCrr;
 
+bool but1, but2, switch1, switch2;
+
 // PID Parameters
 const float kp = 2.0;
 const float ki = 0.0001;
@@ -538,6 +540,10 @@ void stopMotors() {
 bool receiveRadio() {
   if (radio.available()) {
     radio.read(&package, sizeof(package));
+    but1 = package.but1;
+    but2 = package.but2;
+    switch1 = package.switch1;
+    switch2 = package.switch2;
     
     if (package.thrust != 0) {
       if (package.z < lowPassZ && package.z > -lowPassZ)
@@ -569,7 +575,7 @@ bool receiveRadio() {
 }
 
 void checkStatus() {
-  if (package.switch1 == 0) {
+  if (switch1 == 0) {
     stopMotors();
     armed = false;
   }
@@ -614,7 +620,7 @@ void checkStatus() {
     }
   }
   
-  if (package.but2 == 0) {
+  if (but2 == 0) {
     armingCounter += timepi;
     resetYaw();
     
@@ -633,7 +639,7 @@ void checkStatus() {
     armingCounter = 0;
   }
   
-  if (package.but1 == 0) {
+  if (but1 == 0) {
     calCount += timepi;
     
     if (calCount > 2) {
