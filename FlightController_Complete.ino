@@ -308,12 +308,12 @@ void setup() {
   Serial.println(F("  QUADCOPTER FLIGHT CONTROLLER v2.0"));
   Serial.println(F("============================================"));
   
-  // Startup beep sequence
-  beep(1000, 100);
-  delay(100);
-  beep(1500, 100);
-  delay(100);
-  beep(2000, 100);
+  // Startup beep sequence - pleasant melody
+  beep(523, 150);  // C5
+  delay(80);
+  beep(659, 150);  // E5
+  delay(80);
+  beep(784, 200);  // G5
   
   // Initialize I2C
   Wire.begin();
@@ -353,7 +353,7 @@ void setup() {
   Serial.println(F("Pot 2 (A7): D-Gain Tuning"));
   Serial.println(F("============================================"));
   
-  beep(2500, 200);
+  beep(880, 250);  // A5 - ready tone
   
   lastLoopTime = micros();
 }
@@ -392,6 +392,18 @@ void loop() {
     radio.read(&rxData, sizeof(RadioPacket));
     lastRadioRx = millis();
     failsafeActive = false;
+    
+    // Prepare and write ACK payload with telemetry
+    txData.roll = imu.roll;
+    txData.pitch = imu.pitch;
+    txData.yaw = imu.yaw;
+    txData.altitude = currentAltitude;
+    txData.battery = 11.1; // TODO: Read actual voltage
+    txData.flightMode = currentState;
+    txData.loopTime = deltaTime * 1000000;
+    
+    // Write ACK payload for next transmission
+    radio.writeAckPayload(1, &txData, sizeof(TelemetryPacket));
   }
   checkFailsafe();
   
@@ -408,15 +420,6 @@ void loop() {
   
   // Update motors
   updateMotors();
-  
-  // Send telemetry back
-  txData.roll = imu.roll;
-  txData.pitch = imu.pitch;
-  txData.yaw = imu.yaw;
-  txData.altitude = currentAltitude;
-  txData.battery = 11.1; // TODO: Read actual voltage
-  txData.flightMode = currentState;
-  txData.loopTime = deltaTime * 1000000;
   
   // Serial debug (every 100ms)
   static unsigned long lastDebug = 0;
@@ -492,6 +495,7 @@ void initRadio() {
   
   radio.setAutoAck(true);
   radio.enableAckPayload();
+  radio.enableDynamicPayloads();
   radio.setDataRate(RF24_250KBPS);
   radio.setPALevel(RF24_PA_MAX);
   radio.setChannel(103);
@@ -500,6 +504,7 @@ void initRadio() {
   radio.startListening();
   
   Serial.println(F("NRF24L01 initialized (Channel 103)"));
+  Serial.println(F("ACK payloads enabled for telemetry"));
 }
 
 // ============================================================================
@@ -531,7 +536,7 @@ void calibrateIMU() {
   Serial.println(F("Calibrating IMU..."));
   Serial.println(F("Keep drone level and still!"));
   
-  beep(1000, 200);
+  beep(440, 200);  // A4 - calm tone
   delay(1000);
   
   float sumGyroX = 0, sumGyroY = 0, sumGyroZ = 0;
@@ -572,9 +577,9 @@ void calibrateIMU() {
   Serial.print(F("Roll offset: ")); Serial.println(rollOffset);
   Serial.print(F("Pitch offset: ")); Serial.println(pitchOffset);
   
-  beep(1500, 200);
+  beep(659, 200);  // E5
   delay(100);
-  beep(2000, 200);
+  beep(784, 200);  // G5
 }
 
 // ============================================================================
@@ -612,7 +617,7 @@ void calibrateBarometer() {
   calibrationComplete = true;
   
   Serial.println(F("Calibration saved to EEPROM"));
-  beep(2000, 300);
+  beep(880, 300);  // A5 - success tone
 }
 
 // ============================================================================
@@ -825,14 +830,14 @@ void checkButtons() {
     
     if (currentState == STATE_DISARMED) {
       Serial.println(F("Starting calibration..."));
-      beep(1000, 100);
+      beep(523, 150);  // C5
       calibrateIMU();
       calibrateBarometer();
       Serial.println(F("Calibration complete!"));
-      beep(2500, 300);
+      beep(880, 300);  // A5 - success
     } else {
       Serial.println(F("Cannot calibrate while armed!"));
-      beep(500, 200);
+      beep(330, 200);  // E4 - warning
     }
   }
   
@@ -845,7 +850,7 @@ void checkButtons() {
       motorTestActive = true;
       motorTestStep = 0;
       motorTestTimer = now;
-      beep(1500, 100);
+      beep(659, 150);  // E5
     }
   }
   
@@ -860,10 +865,10 @@ void checkButtons() {
         takeoffStartTime = now;
         takeoffTargetAltitude = currentAltitude + 1.0; // 1 meter takeoff
         targetAltitude = takeoffTargetAltitude;
-        beep(2000, 200);
+        beep(784, 200);  // G5 - takeoff
       } else {
         Serial.println(F("Cannot takeoff: calibrate first or barometer unavailable"));
-        beep(500, 300);
+        beep(330, 300);  // E4 - warning
       }
     }
   }
@@ -879,7 +884,7 @@ void checkButtons() {
       landingStartAltitude = currentAltitude;
       landingPhase = LANDING_DESCEND;
       touchdownDetected = false;
-      beep(1800, 200);
+      beep(587, 200);  // D5 - landing
     }
   }
 }
@@ -898,7 +903,7 @@ void motorTest() {
       motorTestActive = false;
       motorTestStep = 0;
       Serial.println(F("Motor test complete"));
-      beep(2000, 200);
+      beep(880, 250);  // A5 - complete
       return;
     }
   }
@@ -918,22 +923,22 @@ void motorTest() {
     case 1:
       Serial.println(F("Front Left spinning"));
       escFL.writeMicroseconds(testSpeed);
-      beep(1000, 100);
+      beep(523, 150);  // C5
       break;
     case 2:
       Serial.println(F("Front Right spinning"));
       escFR.writeMicroseconds(testSpeed);
-      beep(1200, 100);
+      beep(587, 150);  // D5
       break;
     case 3:
       Serial.println(F("Rear Left spinning"));
       escRL.writeMicroseconds(testSpeed);
-      beep(1400, 100);
+      beep(659, 150);  // E5
       break;
     case 4:
       Serial.println(F("Rear Right spinning"));
       escRR.writeMicroseconds(testSpeed);
-      beep(1600, 100);
+      beep(698, 150);  // F5
       break;
   }
 }
@@ -953,7 +958,7 @@ void runStateMachine() {
     // Disarm command
     currentState = STATE_DISARMED;
     Serial.println(F("DISARMED"));
-    beep(1000, 200);
+    beep(440, 250);  // A4 - disarmed
     
     // Reset PID integrators
     pidRoll.integral = 0;
@@ -969,15 +974,15 @@ void runStateMachine() {
     if (calibrationComplete) {
       currentState = STATE_ARMED_IDLE;
       Serial.println(F("ARMED - IDLE"));
-      beep(1500, 100);
+      beep(659, 150);  // E5
       delay(100);
-      beep(1500, 100);
+      beep(784, 150);  // G5 - armed
       
       // Reset yaw reference
       imu.yaw = 0;
     } else {
       Serial.println(F("Cannot arm: calibration required!"));
-      beep(500, 500);
+      beep(330, 400);  // E4 - warning
       return;
     }
   }
@@ -995,11 +1000,11 @@ void runStateMachine() {
           currentState = STATE_ALTITUDE_HOLD;
           targetAltitude = currentAltitude;
           Serial.println(F("ALTITUDE HOLD MODE"));
-          beep(2000, 150);
+          beep(880, 150);  // A5 - alt hold
         } else {
           currentState = STATE_STABILIZE;
           Serial.println(F("STABILIZE MODE"));
-          beep(1800, 150);
+          beep(698, 150);  // F5 - stabilize
         }
       }
       break;
@@ -1050,7 +1055,7 @@ void executeStabilize() {
     currentState = STATE_ALTITUDE_HOLD;
     targetAltitude = currentAltitude;
     Serial.println(F("Switched to ALTITUDE HOLD"));
-    beep(2000, 100);
+    beep(880, 120);  // A5
   }
 }
 
@@ -1072,7 +1077,7 @@ void executeAltitudeHold() {
   if (rxData.modeSwitch == 0) {
     currentState = STATE_STABILIZE;
     Serial.println(F("Switched to STABILIZE"));
-    beep(1800, 100);
+    beep(698, 120);  // F5
   }
   
   // Check if throttle dropped to idle
@@ -1091,7 +1096,7 @@ void executeTakeoff() {
     // Reached target
     Serial.println(F("Takeoff complete, entering ALTITUDE HOLD"));
     currentState = STATE_ALTITUDE_HOLD;
-    beep(2500, 200);
+    beep(880, 250);  // A5 - success
   }
   
   // Timeout after 10 seconds
@@ -1119,7 +1124,7 @@ void executeLanding() {
       if (currentAltitude < TOUCHDOWN_THRESHOLD && abs(verticalVelocity) < TOUCHDOWN_VELOCITY) {
         landingPhase = LANDING_DETECT_TOUCHDOWN;
         Serial.println(F("Touchdown detected"));
-        beep(1500, 100);
+        beep(523, 150);  // C5 - soft touchdown
       }
       break;
       
@@ -1151,7 +1156,7 @@ void executeLanding() {
     case LANDING_COMPLETE:
       Serial.println(F("Landing complete, transitioning to ARMED IDLE"));
       currentState = STATE_ARMED_IDLE;
-      beep(2000, 300);
+      beep(659, 300);  // E5 - landing complete
       landingPhase = LANDING_DESCEND; // Reset for next time
       break;
   }
@@ -1177,10 +1182,10 @@ void emergencyShutdown() {
   escRL.writeMicroseconds(MOTOR_MIN);
   escRR.writeMicroseconds(MOTOR_MIN);
   
-  // Continuous alarm
+  // Continuous alarm (gentle warning)
   static unsigned long lastBeep = 0;
-  if (millis() - lastBeep > 500) {
-    beep(800, 200);
+  if (millis() - lastBeep > 800) {
+    beep(392, 150);  // G4 - warning
     lastBeep = millis();
   }
   
@@ -1218,7 +1223,7 @@ void checkFailsafe() {
         currentState = STATE_DISARMED;
       }
       
-      beep(500, 1000);
+      beep(330, 400);  // E4 - failsafe warning
     }
   }
 }

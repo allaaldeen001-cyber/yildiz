@@ -161,15 +161,15 @@ void setup() {
   Serial.println(F("  QUADCOPTER REMOTE CONTROLLER v2.0"));
   Serial.println(F("============================================"));
   
-  // Startup beep
-  tone(BUZZER_PIN, 1500, 100);
+  // Startup beep - pleasant melody
+  tone(BUZZER_PIN, 523, 150);  // C5
   digitalWrite(LED_PIN, HIGH);
-  delay(100);
+  delay(150);
   digitalWrite(LED_PIN, LOW);
-  delay(100);
-  tone(BUZZER_PIN, 2000, 100);
+  delay(80);
+  tone(BUZZER_PIN, 784, 200);  // G5
   digitalWrite(LED_PIN, HIGH);
-  delay(100);
+  delay(200);
   digitalWrite(LED_PIN, LOW);
   
   // Initialize radio
@@ -189,7 +189,7 @@ void setup() {
   Serial.println(F("  Switch 2 (D3): Stabilize/Altitude Hold"));
   Serial.println(F("============================================"));
   
-  tone(BUZZER_PIN, 2500, 200);
+  tone(BUZZER_PIN, 880, 250);  // A5 - ready tone
   
   lastTransmit = millis();
   lastLinkCheck = millis();
@@ -245,18 +245,19 @@ void initRadio() {
     Serial.println(F("  MISO -> D12"));
     Serial.println(F("  SCK -> D13"));
     
-    // Error indication
+    // Error indication (gentle warning)
     while(1) {
-      tone(BUZZER_PIN, 500, 200);
+      tone(BUZZER_PIN, 330, 200);  // E4 - error
       digitalWrite(LED_PIN, HIGH);
       delay(200);
       digitalWrite(LED_PIN, LOW);
-      delay(200);
+      delay(400);
     }
   }
   
   radio.setAutoAck(true);
   radio.enableAckPayload();
+  radio.enableDynamicPayloads();
   radio.setDataRate(RF24_250KBPS);
   radio.setPALevel(RF24_PA_MAX);
   radio.setChannel(103);
@@ -268,6 +269,7 @@ void initRadio() {
   Serial.println(F("  Channel: 103"));
   Serial.println(F("  Data Rate: 250KBPS"));
   Serial.println(F("  PA Level: MAX"));
+  Serial.println(F("  ACK Payloads: Enabled"));
 }
 
 // ============================================================================
@@ -304,7 +306,7 @@ void calibrateSticks() {
   Serial.print(F("  Pitch center: ")); Serial.println(calPitch.center);
   Serial.print(F("  Roll center: ")); Serial.println(calRoll.center);
   
-  tone(BUZZER_PIN, 2000, 200);
+  tone(BUZZER_PIN, 659, 250);  // E5 - calibration complete
 }
 
 // ============================================================================
@@ -374,11 +376,20 @@ void transmitData() {
   if (success) {
     linkActive = true;
     
-    // Check if there's an ACK payload (telemetry)
-    if (radio.available()) {
-      radio.read(&rxTelemetry, sizeof(TelemetryPacket));
-      telemetryReceived = true;
-      lastTelemetry = millis();
+    // Check for ACK payload with telemetry
+    // ACK payloads are automatically loaded in the RX FIFO after successful write
+    if (radio.isAckPayloadAvailable()) {
+      if (radio.available()) {
+        uint8_t bytes = radio.getDynamicPayloadSize();
+        if (bytes == sizeof(TelemetryPacket)) {
+          radio.read(&rxTelemetry, sizeof(TelemetryPacket));
+          telemetryReceived = true;
+          lastTelemetry = millis();
+        } else {
+          // Flush invalid payload
+          radio.read(&rxTelemetry, bytes);
+        }
+      }
     }
   } else {
     linkActive = false;
@@ -400,9 +411,9 @@ void checkLink() {
   if (millis() - lastTelemetry > 2000) {
     linkActive = false;
     
-    // Alarm if armed
+    // Alarm if armed (gentle warning)
     if (txData.armSwitch == 1) {
-      tone(BUZZER_PIN, 500, 100);
+      tone(BUZZER_PIN, 392, 150);  // G4 - warning
       Serial.println(F("WARNING: Link lost while armed!"));
     }
   }
