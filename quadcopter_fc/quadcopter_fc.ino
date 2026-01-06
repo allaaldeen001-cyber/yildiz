@@ -1,12 +1,47 @@
 /**
- * QUADCOPTER FC - Using I2Cdev + MPU6050 DMP
- * Optimized for Arduino Nano flash size
+ * ============================================================================
+ *                    QUADCOPTER FLIGHT CONTROLLER v3.0
+ * ============================================================================
+ * 
+ * Features:
+ *   ✓ MPU6050 with DMP (hardware sensor fusion)
+ *   ✓ MS5611 barometer (altitude hold)
+ *   ✓ NRF24L01 with ACK (reliable communication)
+ *   ✓ Auto-level (angle mode)
+ *   ✓ Auto-disarm on signal loss
+ *   ✓ Filtered altitude with rate limiting
+ *   ✓ Motor output smoothing
+ * 
+ * Hardware:
+ *   MCU: Arduino Nano (ATmega328P)
+ *   IMU: MPU6050 (I2C 0x68)
+ *   Baro: MS5611 (I2C 0x77)
+ *   Radio: NRF24L01+ (SPI)
+ *   Motors: 4x ESC (PWM 1000-2000µs)
  * 
  * Libraries Required:
- *   - I2Cdev (Jeff Rowberg)
- *   - MPU6050 (Jeff Rowberg) 
- *   - RF24 (TMRh20)
- *   - MS5611 (Rob Tillaart)
+ *   - I2Cdev (Jeff Rowberg): github.com/jrowberg/i2cdevlib
+ *   - MPU6050 (Jeff Rowberg): github.com/jrowberg/i2cdevlib
+ *   - RF24 (TMRh20): github.com/nRF24/RF24
+ *   - MS5611 (Rob Tillaart): github.com/RobTillaart/MS5611
+ * 
+ * Pin Configuration:
+ *   D2  - MPU6050 INT (optional)
+ *   D3  - Motor Front-Left (CCW)
+ *   D4  - NRF24 CE
+ *   D5  - Motor Front-Right (CW)
+ *   D6  - Motor Rear-Left (CW)
+ *   D7  - Status LED
+ *   D8  - Buzzer
+ *   D9  - Motor Rear-Right (CCW)
+ *   D10 - NRF24 CSN
+ *   D11 - NRF24 MOSI
+ *   D12 - NRF24 MISO
+ *   D13 - NRF24 SCK
+ *   A4  - I2C SDA (MPU6050, MS5611)
+ *   A5  - I2C SCL (MPU6050, MS5611)
+ * 
+ * ============================================================================
  */
 
 #include "I2Cdev.h"
@@ -17,486 +52,830 @@
 #include <MS5611.h>
 #include <Servo.h>
 
-// ==================== CONFIG ====================
-#define RF_CHANNEL      108
-#define DEBUG           1       // 0 to save flash
-#define BAUD            115200
+// ============================================================================
+//                              CONFIGURATION
+// ============================================================================
 
-// ==================== PINS ====================
-#define M_FL  3
-#define M_FR  5
-#define M_RL  6
-#define M_RR  9
-#define RF_CE 4
-#define RF_CS 10
-#define LED   7
-#define BZR   8
+// RF Channel (0-125) - MUST MATCH REMOTE CONTROLLER!
+#define RF_CHANNEL          108
 
-// ==================== PARAMS ====================
-#define MAX_ANGLE     45
-#define MAX_YAW       180
-#define ESC_MIN       1000
-#define ESC_MAX       2000
-#define ESC_IDLE      1150
-#define ARM_THR_MAX   50
-#define RF_TIMEOUT    500
-#define MOTOR_RATE    100
-#define ALT_PID_MAX   150
-#define ALT_RATE      50
+// Serial debug (set to 0 to save ~2KB flash if needed)
+#define ENABLE_DEBUG        1
+#define SERIAL_BAUD         115200
 
-// ==================== PACKET ====================
-struct __attribute__((packed)) Pkt {
-    uint16_t thr;
-    int16_t yaw, pitch, roll;
-    uint8_t sw, chk;
-    uint32_t seq;
-    uint8_t ch, res;
-    bool ok() const {
-        const uint8_t* d = (const uint8_t*)this;
-        uint8_t c = 0;
-        for (uint8_t i = 0; i < 9; i++) c ^= d[i];
-        return c == chk;
+// ============================================================================
+//                            PIN DEFINITIONS
+// ============================================================================
+
+#define PIN_MOTOR_FL        3       // Front-Left motor (CCW)
+#define PIN_MOTOR_FR        5       // Front-Right motor (CW)
+#define PIN_MOTOR_RL        6       // Rear-Left motor (CW)
+#define PIN_MOTOR_RR        9       // Rear-Right motor (CCW)
+#define PIN_RF_CE           4       // NRF24 Chip Enable
+#define PIN_RF_CSN          10      // NRF24 Chip Select
+#define PIN_LED             7       // Status LED
+#define PIN_BUZZER          8       // Buzzer
+
+// ============================================================================
+//                          FLIGHT PARAMETERS
+// ============================================================================
+
+// Angle limits
+#define MAX_ROLL_ANGLE      45      // Max roll angle (degrees)
+#define MAX_PITCH_ANGLE     45      // Max pitch angle (degrees)
+#define MAX_YAW_RATE        180     // Max yaw rate (deg/sec)
+
+// ESC configuration
+#define ESC_MIN_US          1000    // Minimum pulse width
+#define ESC_MAX_US          2000    // Maximum pulse width
+#define ESC_IDLE_US         1150    // Idle speed when armed
+#define ESC_ARM_THROTTLE    50      // Max throttle to allow arming
+
+// Safety
+#define RF_TIMEOUT_MS       500     // Disarm after this many ms without signal
+#define MOTOR_RATE_LIMIT    100     // Max motor change per cycle (µs)
+
+// Altitude hold
+#define ALT_PID_MAX         150     // Max altitude PID output (µs)
+#define ALT_RATE_LIMIT      50      // Max alt PID change per cycle
+#define ALT_GROUND_THRESH   0.30    // Below this = on ground (m)
+#define THR_GROUND_THRESH   200     // Below this throttle = on ground
+
+// ============================================================================
+//                         MPU6050 CALIBRATION
+// ============================================================================
+// Run IMU_Zero example from MPU6050 library to get these values for YOUR sensor
+
+#define ACCEL_OFFSET_X      -2366
+#define ACCEL_OFFSET_Y      755
+#define ACCEL_OFFSET_Z      -2006
+#define GYRO_OFFSET_X       10
+#define GYRO_OFFSET_Y       21
+#define GYRO_OFFSET_Z       -19
+
+// ============================================================================
+//                           PID TUNING
+// ============================================================================
+// Adjust these values to tune flight characteristics
+//
+// PROBLEM          -> FIX
+// ----------------    ---------------------
+// Oscillation      -> Reduce Kp or increase Kd
+// Sluggish         -> Increase Kp
+// Drifting         -> Increase Ki
+// Overshoots       -> Increase Kd
+// Fast vibration   -> Reduce Kd
+
+//                          Kp      Ki      Kd
+#define PID_ROLL_KP         6.0
+#define PID_ROLL_KI         0.03
+#define PID_ROLL_KD         2.5
+
+#define PID_PITCH_KP        6.0
+#define PID_PITCH_KI        0.03
+#define PID_PITCH_KD        2.5
+
+#define PID_YAW_KP          4.0
+#define PID_YAW_KI          0.02
+#define PID_YAW_KD          0.0
+
+#define PID_ALT_KP          15.0
+#define PID_ALT_KI          0.1
+#define PID_ALT_KD          8.0
+
+// ============================================================================
+//                          RF PACKET STRUCTURE
+// ============================================================================
+
+struct __attribute__((packed)) ControlPacket {
+    uint16_t throttle;      // 0-1000
+    int16_t  yaw;           // -500 to +500
+    int16_t  pitch;         // -500 to +500
+    int16_t  roll;          // -500 to +500
+    uint8_t  switches;      // Bit 0:Arm, 1:Calib, 2:MotorTest, 3:AltHold
+    uint8_t  checksum;      // XOR of bytes 0-8
+    uint32_t sequence;      // Packet counter
+    uint8_t  channel;       // RF channel verification
+    uint8_t  reserved;
+    
+    bool isValid() const {
+        const uint8_t* data = (const uint8_t*)this;
+        uint8_t calc = 0;
+        for (uint8_t i = 0; i < 9; i++) calc ^= data[i];
+        return calc == checksum;
     }
 };
 
-// ==================== OBJECTS ====================
+// Switch bit definitions
+#define SW_ARM              0
+#define SW_CALIBRATE        1
+#define SW_MOTORTEST        2
+#define SW_ALTHOLD          3
+
+// ============================================================================
+//                           GLOBAL OBJECTS
+// ============================================================================
+
 MPU6050 mpu;
 MS5611 baro(0x77);
-RF24 radio(RF_CE, RF_CS);
-Servo sFL, sFR, sRL, sRR;
+RF24 radio(PIN_RF_CE, PIN_RF_CSN);
+Servo escFL, escFR, escRL, escRR;
 
-// ==================== DMP ====================
-bool dmpOK = false;
-uint8_t devStat;
-uint16_t pktSize;
-uint8_t fifoBuf[64];
-Quaternion q;
-VectorFloat grav;
+// ============================================================================
+//                             DMP VARIABLES
+// ============================================================================
+
+bool dmpReady = false;
+uint8_t dmpStatus;
+uint16_t packetSize;
+uint8_t fifoBuffer[64];
+Quaternion quaternion;
+VectorFloat gravity;
 float ypr[3];
 
-// ==================== FLIGHT ====================
-float roll = 0, pitch = 0, yaw = 0, yawRate = 0;
-float prevYaw = 0;
+// Attitude
+float roll = 0, pitch = 0, yaw = 0;
+float yawRate = 0, prevYaw = 0;
+uint32_t yawTime = 0;
 
-// Baro
-float baseP = 0, alt = 0, altF = 0, altP = 0;
-float vv = 0, vvF = 0;
-uint32_t altT = 0;
-bool baroOK = false;
+// ============================================================================
+//                          BAROMETER VARIABLES
+// ============================================================================
 
-// Radio
-Pkt rx;
-uint32_t lastPkt = 0, pktCnt = 0;
-bool rfOK = false;
-const uint8_t addr[6] = "QUAD1";
+bool baroReady = false;
+float basePressure = 0;
+float altitude = 0, altitudeFiltered = 0, altitudePrev = 0;
+float vertVel = 0, vertVelFiltered = 0;
+uint32_t baroTime = 0;
 
-// State
-enum { ST_DIS, ST_ARM, ST_FAIL };
-uint8_t state = ST_DIS;
+// ============================================================================
+//                            RADIO VARIABLES
+// ============================================================================
 
-// Commands
-int16_t tCmd = 0;
-float rCmd = 0, pCmd = 0, yCmd = 0;
-bool altHoldSw = false, altHoldOn = false;
-float tgtAlt = 0;
+ControlPacket rxPacket;
+uint32_t lastPacketTime = 0;
+uint32_t packetCount = 0;
+bool radioConnected = false;
+const uint8_t radioAddress[6] = "QUAD1";
 
-// PID
-float rOut = 0, pOut = 0, yOut = 0, aOut = 0, aPrev = 0;
+// ============================================================================
+//                           FLIGHT STATE
+// ============================================================================
 
-// Motors
-uint16_t mFL = ESC_MIN, mFR = ESC_MIN, mRL = ESC_MIN, mRR = ESC_MIN;
-uint16_t pFL = ESC_MIN, pFR = ESC_MIN, pRL = ESC_MIN, pRR = ESC_MIN;
+enum FlightState { 
+    STATE_DISARMED, 
+    STATE_ARMED, 
+    STATE_FAILSAFE 
+};
+FlightState flightState = STATE_DISARMED;
 
-bool prevArm = false;
-uint32_t tImu = 0, tPid = 0, tRf = 0, tBar = 0, tDbg = 0, tLed = 0;
+// Control commands
+int16_t throttleCmd = 0;
+float rollCmd = 0, pitchCmd = 0, yawCmd = 0;
+bool altHoldSwitch = false, altHoldActive = false;
+float targetAltitude = 0;
 
-// ==================== PID ====================
-class PID {
+// PID outputs
+float rollOutput = 0, pitchOutput = 0, yawOutput = 0;
+float altOutput = 0, altOutputPrev = 0;
+
+// Motor outputs
+uint16_t motorFL = ESC_MIN_US, motorFR = ESC_MIN_US;
+uint16_t motorRL = ESC_MIN_US, motorRR = ESC_MIN_US;
+uint16_t motorFL_prev = ESC_MIN_US, motorFR_prev = ESC_MIN_US;
+uint16_t motorRL_prev = ESC_MIN_US, motorRR_prev = ESC_MIN_US;
+
+// Previous arm switch state
+bool prevArmSwitch = false;
+
+// Timing
+uint32_t timeIMU = 0, timePID = 0, timeRF = 0, timeBaro = 0;
+uint32_t timeDebug = 0, timeLED = 0;
+
+// ============================================================================
+//                             PID CONTROLLER
+// ============================================================================
+
+class PIDController {
 public:
-    float kp, ki, kd, intg, pMeas, oMin, oMax, iMax;
-    bool init;
-    PID(float p, float i, float d) : kp(p), ki(i), kd(d), intg(0), pMeas(0),
-        oMin(-500), oMax(500), iMax(200), init(false) {}
-    void rst() { intg = 0; pMeas = 0; init = false; }
-    float calc(float sp, float m, float dt) {
-        float e = sp - m;
-        if (!init) { pMeas = m; init = true; }
-        float P = kp * e;
-        intg = constrain(intg + ki * e * dt, -iMax, iMax);
-        float D = kd * (-(m - pMeas) / dt);
-        pMeas = m;
-        return constrain(P + intg + D, oMin, oMax);
+    float Kp, Ki, Kd;
+    float integral, prevMeasurement;
+    float outputMin, outputMax, integralMax;
+    bool initialized;
+    
+    PIDController(float p, float i, float d) : 
+        Kp(p), Ki(i), Kd(d), integral(0), prevMeasurement(0),
+        outputMin(-500), outputMax(500), integralMax(200), initialized(false) {}
+    
+    void reset() {
+        integral = 0;
+        prevMeasurement = 0;
+        initialized = false;
+    }
+    
+    float calculate(float setpoint, float measurement, float dt) {
+        float error = setpoint - measurement;
+        
+        if (!initialized) {
+            prevMeasurement = measurement;
+            initialized = true;
+        }
+        
+        // Proportional
+        float pTerm = Kp * error;
+        
+        // Integral with anti-windup
+        integral = constrain(integral + Ki * error * dt, -integralMax, integralMax);
+        
+        // Derivative on measurement (not error) to avoid derivative kick
+        float derivative = -(measurement - prevMeasurement) / dt;
+        float dTerm = Kd * derivative;
+        prevMeasurement = measurement;
+        
+        return constrain(pTerm + integral + dTerm, outputMin, outputMax);
     }
 };
 
-PID pidR(6.0, 0.03, 2.5);
-PID pidP(6.0, 0.03, 2.5);
-PID pidY(4.0, 0.02, 0.0);
-PID pidA(15.0, 0.1, 8.0);
+// PID controllers
+PIDController pidRoll(PID_ROLL_KP, PID_ROLL_KI, PID_ROLL_KD);
+PIDController pidPitch(PID_PITCH_KP, PID_PITCH_KI, PID_PITCH_KD);
+PIDController pidYaw(PID_YAW_KP, PID_YAW_KI, PID_YAW_KD);
+PIDController pidAlt(PID_ALT_KP, PID_ALT_KI, PID_ALT_KD);
 
-// ==================== BEEP ====================
-void beep(uint16_t ms, uint16_t f = 2000) { tone(BZR, f, ms); }
+// ============================================================================
+//                            BUZZER FUNCTIONS
+// ============================================================================
 
-// ==================== DMP UPDATE ====================
+void beep(uint16_t duration, uint16_t frequency = 2000) {
+    tone(PIN_BUZZER, frequency, duration);
+}
+
+void beepBlocking(uint16_t duration, uint16_t frequency = 2000) {
+    tone(PIN_BUZZER, frequency);
+    delay(duration);
+    noTone(PIN_BUZZER);
+}
+
+void soundStartup() {
+    beepBlocking(100, 1500); delay(50);
+    beepBlocking(100, 2000); delay(50);
+    beepBlocking(100, 2500); delay(50);
+    beepBlocking(200, 3000);
+}
+
+void soundArmed() {
+    beepBlocking(100, 2000); delay(100);
+    beepBlocking(200, 2500);
+}
+
+void soundDisarmed() {
+    beepBlocking(300, 1500);
+}
+
+void soundPaired() {
+    for (int i = 0; i < 5; i++) {
+        beepBlocking(80, 2500);
+        delay(80);
+    }
+}
+
+void soundFailsafe() {
+    beep(500, 800);
+}
+
+void soundReady() {
+    beepBlocking(100, 2000); delay(100);
+    beepBlocking(100, 2500); delay(100);
+    beepBlocking(200, 3000);
+}
+
+// ============================================================================
+//                           DMP UPDATE
+// ============================================================================
+
 bool updateDMP() {
-    if (!dmpOK) return false;
+    if (!dmpReady) return false;
     
-    if (mpu.dmpGetCurrentFIFOPacket(fifoBuf)) {
-        mpu.dmpGetQuaternion(&q, fifoBuf);
-        mpu.dmpGetGravity(&grav, &q);
-        mpu.dmpGetYawPitchRoll(ypr, &q, &grav);
+    if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) {
+        mpu.dmpGetQuaternion(&quaternion, fifoBuffer);
+        mpu.dmpGetGravity(&gravity, &quaternion);
+        mpu.dmpGetYawPitchRoll(ypr, &quaternion, &gravity);
         
-        float newYaw = ypr[0] * 57.2958;
-        pitch = ypr[1] * 57.2958;
-        roll = ypr[2] * 57.2958;
+        // Convert to degrees
+        float newYaw = ypr[0] * 57.2958f;
+        pitch = ypr[1] * 57.2958f;
+        roll = ypr[2] * 57.2958f;
         
-        // Yaw rate
-        static uint32_t yawT = 0;
+        // Calculate yaw rate
         uint32_t now = micros();
-        if (yawT > 0) {
-            float dt = (now - yawT) / 1000000.0;
-            if (dt > 0 && dt < 0.1) {
-                float dY = newYaw - prevYaw;
-                if (dY > 180) dY -= 360;
-                if (dY < -180) dY += 360;
-                yawRate = dY / dt;
+        if (yawTime > 0) {
+            float dt = (now - yawTime) / 1000000.0f;
+            if (dt > 0 && dt < 0.1f) {
+                float deltaYaw = newYaw - prevYaw;
+                // Handle wrap-around
+                if (deltaYaw > 180) deltaYaw -= 360;
+                if (deltaYaw < -180) deltaYaw += 360;
+                yawRate = deltaYaw / dt;
             }
         }
         prevYaw = newYaw;
         yaw = newYaw;
-        yawT = now;
+        yawTime = now;
+        
         return true;
     }
     return false;
 }
 
-// ==================== BARO ====================
-void updateBaro() {
-    if (!baroOK) return;
+// ============================================================================
+//                         BAROMETER UPDATE
+// ============================================================================
+
+void updateBarometer() {
+    if (!baroReady) return;
+    
     baro.read();
-    float p = baro.getPressure();
-    if (p < 300 || p > 1200) return;
+    float pressure = baro.getPressure();
     
-    float raw = 44330.0 * (1.0 - pow(p / baseP, 0.1903));
-    float chg = constrain(raw - alt, -0.2, 0.2);
-    alt += chg;
-    altF = 0.85 * altF + 0.15 * alt;
+    // Validate reading
+    if (pressure < 300 || pressure > 1200) return;
     
+    // Calculate altitude
+    float rawAltitude = 44330.0f * (1.0f - pow(pressure / basePressure, 0.1903f));
+    
+    // Rate limit changes (max 0.2m per sample)
+    float change = constrain(rawAltitude - altitude, -0.2f, 0.2f);
+    altitude += change;
+    
+    // Low-pass filter
+    altitudeFiltered = 0.85f * altitudeFiltered + 0.15f * altitude;
+    
+    // Calculate vertical velocity
     uint32_t now = micros();
-    float dt = (now - altT) / 1000000.0;
-    if (altT > 0 && dt > 0.01 && dt < 0.1) {
-        float rv = constrain((altF - altP) / dt, -3.0, 3.0);
-        vvF = 0.8 * vvF + 0.2 * rv;
-        vv = vvF;
+    float dt = (now - baroTime) / 1000000.0f;
+    
+    if (baroTime > 0 && dt > 0.01f && dt < 0.1f) {
+        float rawVel = constrain((altitudeFiltered - altitudePrev) / dt, -3.0f, 3.0f);
+        vertVelFiltered = 0.8f * vertVelFiltered + 0.2f * rawVel;
+        vertVel = vertVelFiltered;
     }
-    altP = altF;
-    altT = now;
+    
+    altitudePrev = altitudeFiltered;
+    baroTime = now;
 }
 
-// ==================== RADIO ====================
+// ============================================================================
+//                           RADIO UPDATE
+// ============================================================================
+
 void updateRadio() {
     if (radio.available()) {
-        Pkt p;
-        radio.read(&p, sizeof(p));
-        if (p.ok()) {
-            rx = p;
-            lastPkt = millis();
-            pktCnt++;
-            if (!rfOK) {
-                rfOK = true;
-                for (int i = 0; i < 5; i++) { beep(80, 2500); delay(160); }
+        ControlPacket packet;
+        radio.read(&packet, sizeof(packet));
+        
+        if (packet.isValid()) {
+            rxPacket = packet;
+            lastPacketTime = millis();
+            packetCount++;
+            
+            // First connection
+            if (!radioConnected) {
+                radioConnected = true;
+                soundPaired();
             }
         }
     }
-    if (rfOK && millis() - lastPkt > RF_TIMEOUT) {
-        rfOK = false;
-        if (state == ST_ARM) {
-            state = ST_FAIL;
-            beep(500, 800);
+    
+    // Check for timeout
+    if (radioConnected && (millis() - lastPacketTime > RF_TIMEOUT_MS)) {
+        radioConnected = false;
+        
+        if (flightState == STATE_ARMED) {
+            flightState = STATE_FAILSAFE;
+            soundFailsafe();
         }
     }
 }
 
-// ==================== COMMANDS ====================
-void processCmd() {
-    if (!rfOK) { tCmd = 0; rCmd = pCmd = yCmd = 0; return; }
-    
-    tCmd = rx.thr;
-    rCmd = map(rx.roll, -500, 500, -MAX_ANGLE, MAX_ANGLE);
-    pCmd = map(rx.pitch, -500, 500, -MAX_ANGLE, MAX_ANGLE);
-    yCmd = map(rx.yaw, -500, 500, -MAX_YAW, MAX_YAW);
-    
-    bool arm = rx.sw & 1;
-    altHoldSw = rx.sw & 8;
-    
-    if (arm && !prevArm && state == ST_DIS) {
-        if (tCmd <= ARM_THR_MAX && rfOK && dmpOK) {
-            state = ST_ARM;
-            pidR.rst(); pidP.rst(); pidY.rst(); pidA.rst();
-            aPrev = 0; tgtAlt = altF;
-            beep(100, 2000); delay(100); beep(200, 2500);
-        }
-    } else if (!arm && state == ST_ARM) {
-        state = ST_DIS;
-        beep(300, 1500);
-    }
-    
-    if (state == ST_FAIL && (!arm || (rfOK && tCmd < 100))) {
-        state = ST_DIS;
-        beep(200, 1500);
-    }
-    
-    prevArm = arm;
-}
+// ============================================================================
+//                        COMMAND PROCESSING
+// ============================================================================
 
-// ==================== PID ====================
-void updatePID(float dt) {
-    float tR = pidR.calc(rCmd, roll, dt);
-    float tP = pidP.calc(pCmd, pitch, dt);
-    float tY = pidY.calc(yCmd, yawRate, dt);
-    
-    if (state != ST_ARM) {
-        rOut = tR; pOut = tP; yOut = tY;
-        aOut = aPrev = 0;
+void processCommands() {
+    if (!radioConnected) {
+        throttleCmd = 0;
+        rollCmd = pitchCmd = yawCmd = 0;
         return;
     }
     
-    rOut = tR; pOut = tP; yOut = tY;
+    // Extract commands
+    throttleCmd = rxPacket.throttle;
+    rollCmd = map(rxPacket.roll, -500, 500, -MAX_ROLL_ANGLE, MAX_ROLL_ANGLE);
+    pitchCmd = map(rxPacket.pitch, -500, 500, -MAX_PITCH_ANGLE, MAX_PITCH_ANGLE);
+    yawCmd = map(rxPacket.yaw, -500, 500, -MAX_YAW_RATE, MAX_YAW_RATE);
     
-    bool gnd = (tCmd < 200) || (abs(altF) < 0.3 && abs(vv) < 0.5);
-    altHoldOn = altHoldSw && !gnd && baroOK;
+    // Extract switches
+    bool armSwitch = rxPacket.switches & (1 << SW_ARM);
+    altHoldSwitch = rxPacket.switches & (1 << SW_ALTHOLD);
     
-    if (altHoldOn) {
-        if (abs(tCmd - 500) > 50) tgtAlt += ((tCmd - 500) / 500.0) * 0.01;
-        float raw = pidA.calc(tgtAlt, altF, dt);
-        raw = constrain(raw, -ALT_PID_MAX, ALT_PID_MAX);
-        float chg = constrain(raw - aPrev, -ALT_RATE, ALT_RATE);
-        aOut = aPrev + chg;
-        aPrev = aOut;
+    // Arm logic
+    if (armSwitch && !prevArmSwitch && flightState == STATE_DISARMED) {
+        // Arming conditions
+        if (throttleCmd <= ESC_ARM_THROTTLE && radioConnected && dmpReady) {
+            flightState = STATE_ARMED;
+            pidRoll.reset();
+            pidPitch.reset();
+            pidYaw.reset();
+            pidAlt.reset();
+            altOutputPrev = 0;
+            targetAltitude = altitudeFiltered;
+            soundArmed();
+        }
+    } 
+    // Disarm
+    else if (!armSwitch && flightState == STATE_ARMED) {
+        flightState = STATE_DISARMED;
+        soundDisarmed();
+    }
+    
+    // Failsafe recovery
+    if (flightState == STATE_FAILSAFE) {
+        if (!armSwitch || (radioConnected && throttleCmd < 100)) {
+            flightState = STATE_DISARMED;
+            beep(200, 1500);
+        }
+    }
+    
+    prevArmSwitch = armSwitch;
+}
+
+// ============================================================================
+//                            PID UPDATE
+// ============================================================================
+
+void updatePID(float dt) {
+    // Always calculate PID (for debugging even when disarmed)
+    float tempRoll = pidRoll.calculate(rollCmd, roll, dt);
+    float tempPitch = pidPitch.calculate(pitchCmd, pitch, dt);
+    float tempYaw = pidYaw.calculate(yawCmd, yawRate, dt);
+    
+    // Store for display
+    rollOutput = tempRoll;
+    pitchOutput = tempPitch;
+    yawOutput = tempYaw;
+    
+    if (flightState != STATE_ARMED) {
+        altOutput = altOutputPrev = 0;
+        return;
+    }
+    
+    // Ground detection
+    bool onGround = (throttleCmd < THR_GROUND_THRESH) || 
+                    (abs(altitudeFiltered) < ALT_GROUND_THRESH && abs(vertVel) < 0.5f);
+    
+    altHoldActive = altHoldSwitch && !onGround && baroReady;
+    
+    if (altHoldActive) {
+        // Adjust target altitude with throttle
+        float thrDeviation = throttleCmd - 500;
+        if (abs(thrDeviation) > 50) {
+            targetAltitude += (thrDeviation / 500.0f) * 0.01f;
+        }
+        
+        // Calculate altitude PID
+        float rawAltOut = pidAlt.calculate(targetAltitude, altitudeFiltered, dt);
+        rawAltOut = constrain(rawAltOut, -ALT_PID_MAX, ALT_PID_MAX);
+        
+        // Rate limit
+        float altChange = constrain(rawAltOut - altOutputPrev, -ALT_RATE_LIMIT, ALT_RATE_LIMIT);
+        altOutput = altOutputPrev + altChange;
+        altOutputPrev = altOutput;
     } else {
-        aOut = aPrev = 0;
-        pidA.rst();
-        if (altHoldSw) tgtAlt = altF;
+        altOutput = altOutputPrev = 0;
+        pidAlt.reset();
+        if (altHoldSwitch) targetAltitude = altitudeFiltered;
     }
 }
 
-// ==================== MOTORS ====================
-uint16_t rLim(uint16_t t, uint16_t p) {
-    int16_t c = constrain((int16_t)t - (int16_t)p, -MOTOR_RATE, MOTOR_RATE);
-    return p + c;
+// ============================================================================
+//                           MOTOR MIXING
+// ============================================================================
+
+uint16_t rateLimitMotor(uint16_t target, uint16_t previous) {
+    int16_t change = constrain((int16_t)target - (int16_t)previous, 
+                               -MOTOR_RATE_LIMIT, MOTOR_RATE_LIMIT);
+    return previous + change;
 }
 
 void updateMotors() {
-    if (state != ST_ARM) {
-        mFL = mFR = mRL = mRR = ESC_MIN;
-        pFL = pFR = pRL = pRR = ESC_MIN;
+    if (flightState != STATE_ARMED) {
+        motorFL = motorFR = motorRL = motorRR = ESC_MIN_US;
+        motorFL_prev = motorFR_prev = motorRL_prev = motorRR_prev = ESC_MIN_US;
     } else {
-        int16_t base = map(tCmd, 0, 1000, ESC_IDLE, ESC_MAX) - ESC_MIN;
-        if (altHoldOn) base += (int16_t)aOut;
+        // Base throttle
+        int16_t baseThrottle = map(throttleCmd, 0, 1000, ESC_IDLE_US, ESC_MAX_US) - ESC_MIN_US;
         
-        int16_t fl = base - (int16_t)rOut + (int16_t)pOut - (int16_t)yOut;
-        int16_t fr = base + (int16_t)rOut + (int16_t)pOut + (int16_t)yOut;
-        int16_t rl = base - (int16_t)rOut - (int16_t)pOut + (int16_t)yOut;
-        int16_t rr = base + (int16_t)rOut - (int16_t)pOut - (int16_t)yOut;
+        // Add altitude hold correction
+        if (altHoldActive) {
+            baseThrottle += (int16_t)altOutput;
+        }
         
-        uint16_t tFL = constrain(fl + ESC_MIN, ESC_IDLE, ESC_MAX);
-        uint16_t tFR = constrain(fr + ESC_MIN, ESC_IDLE, ESC_MAX);
-        uint16_t tRL = constrain(rl + ESC_MIN, ESC_IDLE, ESC_MAX);
-        uint16_t tRR = constrain(rr + ESC_MIN, ESC_IDLE, ESC_MAX);
+        // Motor mixing (Quad-X configuration)
+        // FL (CCW) = Throttle - Roll + Pitch - Yaw
+        // FR (CW)  = Throttle + Roll + Pitch + Yaw
+        // RL (CW)  = Throttle - Roll - Pitch + Yaw
+        // RR (CCW) = Throttle + Roll - Pitch - Yaw
         
-        mFL = rLim(tFL, pFL); pFL = mFL;
-        mFR = rLim(tFR, pFR); pFR = mFR;
-        mRL = rLim(tRL, pRL); pRL = mRL;
-        mRR = rLim(tRR, pRR); pRR = mRR;
+        int16_t fl = baseThrottle - (int16_t)rollOutput + (int16_t)pitchOutput - (int16_t)yawOutput;
+        int16_t fr = baseThrottle + (int16_t)rollOutput + (int16_t)pitchOutput + (int16_t)yawOutput;
+        int16_t rl = baseThrottle - (int16_t)rollOutput - (int16_t)pitchOutput + (int16_t)yawOutput;
+        int16_t rr = baseThrottle + (int16_t)rollOutput - (int16_t)pitchOutput - (int16_t)yawOutput;
+        
+        // Constrain
+        uint16_t targetFL = constrain(fl + ESC_MIN_US, ESC_IDLE_US, ESC_MAX_US);
+        uint16_t targetFR = constrain(fr + ESC_MIN_US, ESC_IDLE_US, ESC_MAX_US);
+        uint16_t targetRL = constrain(rl + ESC_MIN_US, ESC_IDLE_US, ESC_MAX_US);
+        uint16_t targetRR = constrain(rr + ESC_MIN_US, ESC_IDLE_US, ESC_MAX_US);
+        
+        // Rate limit
+        motorFL = rateLimitMotor(targetFL, motorFL_prev); motorFL_prev = motorFL;
+        motorFR = rateLimitMotor(targetFR, motorFR_prev); motorFR_prev = motorFR;
+        motorRL = rateLimitMotor(targetRL, motorRL_prev); motorRL_prev = motorRL;
+        motorRR = rateLimitMotor(targetRR, motorRR_prev); motorRR_prev = motorRR;
     }
     
-    sFL.writeMicroseconds(mFL);
-    sFR.writeMicroseconds(mFR);
-    sRL.writeMicroseconds(mRL);
-    sRR.writeMicroseconds(mRR);
+    // Write to ESCs
+    escFL.writeMicroseconds(motorFL);
+    escFR.writeMicroseconds(motorFR);
+    escRL.writeMicroseconds(motorRL);
+    escRR.writeMicroseconds(motorRR);
 }
 
-// ==================== LED ====================
+// ============================================================================
+//                            LED UPDATE
+// ============================================================================
+
 void updateLED() {
-    static bool on = false;
-    uint16_t iv = (state == ST_ARM) ? 0 : (state == ST_FAIL) ? 100 : 500;
-    if (iv == 0) { digitalWrite(LED, HIGH); return; }
-    if (millis() - tLed >= iv) {
-        tLed = millis();
-        on = !on;
-        digitalWrite(LED, on);
+    static bool ledState = false;
+    uint16_t interval;
+    
+    switch (flightState) {
+        case STATE_ARMED:    interval = 0; break;      // Solid ON
+        case STATE_FAILSAFE: interval = 100; break;    // Fast blink
+        default:             interval = 500; break;    // Slow blink
+    }
+    
+    if (interval == 0) {
+        digitalWrite(PIN_LED, HIGH);
+    } else if (millis() - timeLED >= interval) {
+        timeLED = millis();
+        ledState = !ledState;
+        digitalWrite(PIN_LED, ledState);
     }
 }
 
-// ==================== SETUP ====================
+// ============================================================================
+//                           DEBUG OUTPUT
+// ============================================================================
+
+#if ENABLE_DEBUG
+void printDebug() {
+    // State
+    switch (flightState) {
+        case STATE_ARMED:    Serial.print(F("ARM ")); break;
+        case STATE_FAILSAFE: Serial.print(F("FAIL")); break;
+        default:             Serial.print(F("DIS ")); break;
+    }
+    
+    // RF
+    Serial.print(F(" RF:"));
+    Serial.print(radioConnected ? packetCount : 0);
+    
+    // Angles
+    Serial.print(F(" R:"));
+    Serial.print(roll, 1);
+    Serial.print(F(" P:"));
+    Serial.print(pitch, 1);
+    
+    // PID
+    Serial.print(F(" PID:"));
+    Serial.print((int)rollOutput);
+    Serial.print(F(","));
+    Serial.print((int)pitchOutput);
+    
+    // Altitude
+    if (baroReady) {
+        Serial.print(F(" Alt:"));
+        Serial.print(altitudeFiltered, 2);
+        Serial.print(altHoldActive ? F("*") : F(""));
+    }
+    
+    // Motors
+    Serial.print(F(" M:"));
+    Serial.print(motorFL);
+    Serial.print(F(","));
+    Serial.print(motorFR);
+    Serial.print(F(","));
+    Serial.print(motorRL);
+    Serial.print(F(","));
+    Serial.println(motorRR);
+}
+#endif
+
+// ============================================================================
+//                              SETUP
+// ============================================================================
+
 void setup() {
-#if DEBUG
-    Serial.begin(BAUD);
-    Serial.println(F("QuadFC DMP"));
-    Serial.print(F("CH:")); Serial.println(RF_CHANNEL);
+#if ENABLE_DEBUG
+    Serial.begin(SERIAL_BAUD);
+    Serial.println(F("\n=== QuadFC v3.0 ==="));
+    Serial.print(F("RF Channel: "));
+    Serial.println(RF_CHANNEL);
 #endif
     
-    pinMode(LED, OUTPUT);
-    pinMode(BZR, OUTPUT);
-    digitalWrite(LED, HIGH);
+    // Initialize pins
+    pinMode(PIN_LED, OUTPUT);
+    pinMode(PIN_BUZZER, OUTPUT);
+    digitalWrite(PIN_LED, HIGH);
     
-    beep(100, 1500); delay(150);
-    beep(100, 2000); delay(150);
-    beep(200, 2500);
+    soundStartup();
     
-    // MPU6050 + DMP
-#if DEBUG
-    Serial.print(F("MPU..."));
+    // ---- Initialize MPU6050 + DMP ----
+#if ENABLE_DEBUG
+    Serial.print(F("MPU6050..."));
 #endif
+    
     Wire.begin();
     Wire.setClock(400000);
     mpu.initialize();
     
     if (!mpu.testConnection()) {
-#if DEBUG
-        Serial.println(F("FAIL-conn"));
+#if ENABLE_DEBUG
+        Serial.println(F("FAIL (connection)"));
 #endif
-        while(1) { beep(200, 500); delay(400); }
+        while (1) { beepBlocking(200, 500); delay(300); }
     }
     
-    devStat = mpu.dmpInitialize();
+    dmpStatus = mpu.dmpInitialize();
     
-    // Offsets from IMU_Zero calibration
-    mpu.setXAccelOffset(-2366);
-    mpu.setYAccelOffset(755);
-    mpu.setZAccelOffset(-2006);
-    mpu.setXGyroOffset(10);
-    mpu.setYGyroOffset(21);
-    mpu.setZGyroOffset(-19);
+    // Set calibration offsets
+    mpu.setXAccelOffset(ACCEL_OFFSET_X);
+    mpu.setYAccelOffset(ACCEL_OFFSET_Y);
+    mpu.setZAccelOffset(ACCEL_OFFSET_Z);
+    mpu.setXGyroOffset(GYRO_OFFSET_X);
+    mpu.setYGyroOffset(GYRO_OFFSET_Y);
+    mpu.setZGyroOffset(GYRO_OFFSET_Z);
     
-    if (devStat == 0) {
-#if DEBUG
-        Serial.print(F("Cal..."));
+    if (dmpStatus == 0) {
+#if ENABLE_DEBUG
+        Serial.print(F("calibrating..."));
 #endif
         mpu.CalibrateAccel(6);
         mpu.CalibrateGyro(6);
         mpu.setDMPEnabled(true);
-        pktSize = mpu.dmpGetFIFOPacketSize();
-        dmpOK = true;
-#if DEBUG
+        packetSize = mpu.dmpGetFIFOPacketSize();
+        dmpReady = true;
+#if ENABLE_DEBUG
         Serial.println(F("OK"));
 #endif
     } else {
-#if DEBUG
-        Serial.print(F("FAIL-")); Serial.println(devStat);
+#if ENABLE_DEBUG
+        Serial.print(F("FAIL (DMP error "));
+        Serial.print(dmpStatus);
+        Serial.println(F(")"));
 #endif
-        while(1) { beep(200, 600); delay(400); }
+        while (1) { beepBlocking(200, 600); delay(300); }
     }
     
-    // Barometer
-#if DEBUG
-    Serial.print(F("Baro..."));
+    // ---- Initialize MS5611 Barometer ----
+#if ENABLE_DEBUG
+    Serial.print(F("MS5611..."));
 #endif
+    
     if (baro.begin()) {
+        // Get baseline pressure
         float sum = 0;
-        for (int i = 0; i < 10; i++) { baro.read(); sum += baro.getPressure(); delay(50); }
-        baseP = sum / 10.0;
-        baroOK = true;
-#if DEBUG
-        Serial.println(F("OK"));
+        for (int i = 0; i < 10; i++) {
+            baro.read();
+            sum += baro.getPressure();
+            delay(50);
+        }
+        basePressure = sum / 10.0f;
+        baroReady = true;
+#if ENABLE_DEBUG
+        Serial.print(F("OK ("));
+        Serial.print(basePressure, 1);
+        Serial.println(F(" mbar)"));
 #endif
     } else {
-#if DEBUG
-        Serial.println(F("FAIL"));
+#if ENABLE_DEBUG
+        Serial.println(F("FAIL (continuing without altitude hold)"));
 #endif
     }
     
-    // Radio
-#if DEBUG
-    Serial.print(F("RF..."));
+    // ---- Initialize NRF24L01 ----
+#if ENABLE_DEBUG
+    Serial.print(F("NRF24L01..."));
 #endif
+    
     if (!radio.begin()) {
-#if DEBUG
+#if ENABLE_DEBUG
         Serial.println(F("FAIL"));
 #endif
-        while(1) { beep(200, 700); delay(400); }
+        while (1) { beepBlocking(200, 700); delay(300); }
     }
+    
     radio.setChannel(RF_CHANNEL);
     radio.setDataRate(RF24_2MBPS);
     radio.setPALevel(RF24_PA_MAX);
-    radio.setPayloadSize(16);
+    radio.setPayloadSize(sizeof(ControlPacket));
     radio.setAutoAck(true);
     radio.setRetries(5, 3);
     radio.setCRCLength(RF24_CRC_16);
-    radio.openReadingPipe(1, addr);
+    radio.openReadingPipe(1, radioAddress);
     radio.startListening();
-#if DEBUG
+    
+#if ENABLE_DEBUG
     Serial.println(F("OK"));
 #endif
     
-    // ESCs
-    sFL.attach(M_FL, ESC_MIN, ESC_MAX);
-    sFR.attach(M_FR, ESC_MIN, ESC_MAX);
-    sRL.attach(M_RL, ESC_MIN, ESC_MAX);
-    sRR.attach(M_RR, ESC_MIN, ESC_MAX);
-    sFL.writeMicroseconds(ESC_MIN);
-    sFR.writeMicroseconds(ESC_MIN);
-    sRL.writeMicroseconds(ESC_MIN);
-    sRR.writeMicroseconds(ESC_MIN);
-    
-    pidA.oMin = -ALT_PID_MAX;
-    pidA.oMax = ALT_PID_MAX;
-    pidA.iMax = 50;
-    
-#if DEBUG
-    Serial.println(F("Ready!"));
+    // ---- Initialize ESCs ----
+#if ENABLE_DEBUG
+    Serial.print(F("ESCs..."));
 #endif
-    beep(100, 2000); delay(100);
-    beep(100, 2500); delay(100);
-    beep(200, 3000);
     
-    tImu = tPid = tRf = tBar = micros();
-    tDbg = tLed = millis();
+    escFL.attach(PIN_MOTOR_FL, ESC_MIN_US, ESC_MAX_US);
+    escFR.attach(PIN_MOTOR_FR, ESC_MIN_US, ESC_MAX_US);
+    escRL.attach(PIN_MOTOR_RL, ESC_MIN_US, ESC_MAX_US);
+    escRR.attach(PIN_MOTOR_RR, ESC_MIN_US, ESC_MAX_US);
+    
+    escFL.writeMicroseconds(ESC_MIN_US);
+    escFR.writeMicroseconds(ESC_MIN_US);
+    escRL.writeMicroseconds(ESC_MIN_US);
+    escRR.writeMicroseconds(ESC_MIN_US);
+    
+#if ENABLE_DEBUG
+    Serial.println(F("OK"));
+#endif
+    
+    // ---- Configure PID limits ----
+    pidAlt.outputMin = -ALT_PID_MAX;
+    pidAlt.outputMax = ALT_PID_MAX;
+    pidAlt.integralMax = 50;
+    
+    // ---- Ready! ----
+#if ENABLE_DEBUG
+    Serial.println(F("\n*** READY ***"));
+    Serial.println(F("Waiting for RC connection...\n"));
+#endif
+    
+    soundReady();
+    
+    // Initialize timing
+    timeIMU = timePID = timeRF = timeBaro = micros();
+    timeDebug = timeLED = millis();
 }
 
-// ==================== LOOP ====================
+// ============================================================================
+//                             MAIN LOOP
+// ============================================================================
+
 void loop() {
     uint32_t now = micros();
     
-    // DMP ~100Hz (as fast as available)
+    // Update DMP (as fast as available, ~100Hz)
     updateDMP();
     
-    // Radio 50Hz
-    if (now - tRf >= 20000) {
-        tRf = now;
+    // Update Radio (50Hz)
+    if (now - timeRF >= 20000) {
+        timeRF = now;
         updateRadio();
-        processCmd();
+        processCommands();
     }
     
-    // Baro 40Hz
-    if (now - tBar >= 25000) {
-        tBar = now;
-        updateBaro();
+    // Update Barometer (40Hz)
+    if (now - timeBaro >= 25000) {
+        timeBaro = now;
+        updateBarometer();
     }
     
-    // PID + Motors 250Hz
-    if (now - tPid >= 4000) {
-        float dt = (now - tPid) / 1000000.0;
-        tPid = now;
+    // Update PID + Motors (250Hz)
+    if (now - timePID >= 4000) {
+        float dt = (now - timePID) / 1000000.0f;
+        timePID = now;
         updatePID(dt);
         updateMotors();
     }
     
+    // Update LED
     updateLED();
     
-#if DEBUG
-    if (millis() - tDbg >= 200) {
-        tDbg = millis();
-        Serial.print(state == ST_ARM ? F("ARM") : state == ST_FAIL ? F("FAIL") : F("DIS"));
-        Serial.print(F(" RF:")); Serial.print(rfOK ? pktCnt : 0);
-        Serial.print(F(" R:")); Serial.print(roll, 1);
-        Serial.print(F(" P:")); Serial.print(pitch, 1);
-        Serial.print(F(" PID:")); Serial.print(rOut, 0);
-        Serial.print(F(",")); Serial.print(pOut, 0);
-        Serial.print(F(" M:")); Serial.print(mFL);
-        Serial.print(F(",")); Serial.print(mFR);
-        Serial.print(F(",")); Serial.print(mRL);
-        Serial.print(F(",")); Serial.println(mRR);
+    // Debug output (5Hz)
+#if ENABLE_DEBUG
+    if (millis() - timeDebug >= 200) {
+        timeDebug = millis();
+        printDebug();
     }
 #endif
 }
