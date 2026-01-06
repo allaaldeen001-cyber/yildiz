@@ -357,11 +357,25 @@ public:
     }
 };
 
-// PID Controllers
-PID pidRoll(4.0f, 0.02f, 1.5f);
-PID pidPitch(4.0f, 0.02f, 1.5f);
-PID pidYaw(3.0f, 0.01f, 0.0f);
-PID pidAlt(50.0f, 0.5f, 30.0f);  // Altitude PID
+// ============================================================================
+// PID TUNING VALUES - ADJUST THESE TO FIX FLIGHT PROBLEMS!
+// ============================================================================
+// Format: PID(Kp, Ki, Kd)
+//
+// PROBLEM           | FIX
+// ------------------|--------------------------------------------------
+// Fast shaking      | REDUCE Kd (try 1.0 instead of 1.5)
+// Slow wobbling     | INCREASE Kd (try 2.0) or REDUCE Kp (try 3.0)
+// Constant drift    | INCREASE Ki (try 0.04 instead of 0.02)
+// Overshoots        | INCREASE Kd (try 2.0) or REDUCE Kp (try 3.0)
+// Sluggish response | INCREASE Kp (try 5.0 instead of 4.0)
+// ============================================================================
+
+//                     Kp     Ki      Kd
+PID pidRoll           (4.0f,  0.02f,  1.5f);   // Roll stabilization
+PID pidPitch          (4.0f,  0.02f,  1.5f);   // Pitch stabilization
+PID pidYaw            (3.0f,  0.01f,  0.0f);   // Yaw rate control
+PID pidAlt            (50.0f, 0.5f,   30.0f);  // Altitude hold
 
 // ============================================================================
 // TIMING VARIABLES
