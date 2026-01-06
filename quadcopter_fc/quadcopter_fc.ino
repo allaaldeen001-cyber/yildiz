@@ -118,6 +118,7 @@ Servo escFL, escFR, escRL, escRR;
 // ============================================================================
 
 #define MPU_ADDR        0x68
+#define REG_WHO_AM_I    0x75
 #define REG_PWR_MGMT    0x6B
 #define REG_CONFIG      0x1A
 #define REG_GYRO_CFG    0x1B
@@ -237,76 +238,151 @@ void mpuWrite(uint8_t reg, uint8_t val) {
     Wire.beginTransmission(MPU_ADDR);
     Wire.write(reg);
     Wire.write(val);
-    Wire.endTransmission();
+    Wire.endTransmission(true);
+    delay(5);  // Give time for register to update
+}
+
+uint8_t mpuReadReg(uint8_t reg) {
+    Wire.beginTransmission(MPU_ADDR);
+    Wire.write(reg);
+    Wire.endTransmission(false);
+    Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)1, (uint8_t)true);
+    return Wire.available() ? Wire.read() : 0;
 }
 
 bool mpuInit() {
     Wire.begin();
-    Wire.setClock(400000);  // 400kHz I2C
-    delay(50);  // Wait for I2C to stabilize
+    delay(100);
     
-    // Reset I2C if stuck
-    Wire.beginTransmission(MPU_ADDR);
-    Wire.endTransmission(true);
-    delay(10);
+    // Start with slow I2C (more reliable for init)
+    Wire.setClock(100000);
     
-    // Check connection
+#if DEBUG_ENABLED
+    Serial.println(F("  Checking connection..."));
+#endif
+    
+    // Simple ping test
     Wire.beginTransmission(MPU_ADDR);
-    if (Wire.endTransmission() != 0) {
-        // Try again with slower clock
-        Wire.setClock(100000);  // Try 100kHz
-        delay(10);
-        Wire.beginTransmission(MPU_ADDR);
-        if (Wire.endTransmission() != 0) return false;
+    uint8_t err = Wire.endTransmission(true);
+    if (err != 0) {
+#if DEBUG_ENABLED
+        Serial.print(F("  I2C error: "));
+        Serial.println(err);
+#endif
+        return false;
     }
     
-    // Reset MPU6050
-    mpuWrite(REG_PWR_MGMT, 0x80);   // Device reset
-    delay(100);                     // Wait for reset
+#if DEBUG_ENABLED
+    Serial.println(F("  Reading WHO_AM_I..."));
+#endif
     
-    mpuWrite(REG_PWR_MGMT, 0x00);   // Wake up
-    delay(10);
-    mpuWrite(REG_PWR_MGMT, 0x01);   // PLL with X gyro
-    delay(10);
-    mpuWrite(REG_SMPLRT, 0x00);     // 1kHz sample rate
-    mpuWrite(REG_CONFIG, 0x03);     // 44Hz DLPF
-    mpuWrite(REG_GYRO_CFG, 0x00);   // ±250°/s
-    mpuWrite(REG_ACCEL_CFG, 0x00);  // ±2g
-    delay(10);
+    // Check WHO_AM_I register (should be 0x68 for MPU6050)
+    uint8_t whoami = mpuReadReg(REG_WHO_AM_I);
+#if DEBUG_ENABLED
+    Serial.print(F("  WHO_AM_I: 0x"));
+    Serial.println(whoami, HEX);
+#endif
     
-    // Verify we can read
-    if (!mpuRead()) return false;
-    
-    // Check if we get non-zero values (at least Z accel should be ~16384)
-    if (accelRaw[0] == 0 && accelRaw[1] == 0 && accelRaw[2] == 0) {
-        return false;  // Sensor not responding properly
+    // MPU6050 returns 0x68, MPU6500 returns 0x70, MPU9250 returns 0x71
+    if (whoami != 0x68 && whoami != 0x70 && whoami != 0x71 && whoami != 0x98) {
+#if DEBUG_ENABLED
+        Serial.println(F("  Unknown device!"));
+#endif
+        // Continue anyway - might still work
     }
     
-    return true;
+#if DEBUG_ENABLED
+    Serial.println(F("  Resetting..."));
+#endif
+    
+    // Reset device
+    mpuWrite(REG_PWR_MGMT, 0x80);
+    delay(150);
+    
+#if DEBUG_ENABLED
+    Serial.println(F("  Waking up..."));
+#endif
+    
+    // Wake up
+    mpuWrite(REG_PWR_MGMT, 0x00);
+    delay(50);
+    
+    // Set clock source to X gyro
+    mpuWrite(REG_PWR_MGMT, 0x01);
+    delay(10);
+    
+#if DEBUG_ENABLED
+    Serial.println(F("  Configuring..."));
+#endif
+    
+    // Configure
+    mpuWrite(REG_SMPLRT, 0x00);     // Sample rate divider = 0 (1kHz)
+    mpuWrite(REG_CONFIG, 0x03);     // DLPF = 3 (44Hz)
+    mpuWrite(REG_GYRO_CFG, 0x00);   // Gyro ±250°/s
+    mpuWrite(REG_ACCEL_CFG, 0x00);  // Accel ±2g
+    
+    delay(50);
+    
+    // Now switch to fast I2C for normal operation
+    Wire.setClock(400000);
+    
+#if DEBUG_ENABLED
+    Serial.println(F("  Testing read..."));
+#endif
+    
+    // Test read
+    for (int retry = 0; retry < 10; retry++) {
+        if (mpuRead()) {
+#if DEBUG_ENABLED
+            Serial.print(F("  Success! Raw Z: "));
+            Serial.println(accelRaw[2]);
+#endif
+            return true;
+        }
+        delay(20);
+    }
+    
+#if DEBUG_ENABLED
+    Serial.println(F("  All reads failed!"));
+#endif
+    return false;
 }
 
 bool mpuRead() {
     Wire.beginTransmission(MPU_ADDR);
     Wire.write(REG_ACCEL_OUT);
-    uint8_t error = Wire.endTransmission(false);
+    uint8_t error = Wire.endTransmission(false);  // Keep connection open
+    
     if (error != 0) {
         imuFailCount++;
+        // Try to recover
+        Wire.endTransmission(true);
         return false;
     }
     
-    uint8_t count = Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)14);
-    if (count < 14) {
+    uint8_t bytesReceived = Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)14, (uint8_t)true);
+    
+    if (bytesReceived != 14) {
         imuFailCount++;
+        // Flush any partial data
+        while (Wire.available()) Wire.read();
         return false;
     }
     
-    accelRaw[0] = (Wire.read() << 8) | Wire.read();
-    accelRaw[1] = (Wire.read() << 8) | Wire.read();
-    accelRaw[2] = (Wire.read() << 8) | Wire.read();
-    Wire.read(); Wire.read();  // Skip temp
-    gyroRaw[0] = (Wire.read() << 8) | Wire.read();
-    gyroRaw[1] = (Wire.read() << 8) | Wire.read();
-    gyroRaw[2] = (Wire.read() << 8) | Wire.read();
+    // Read all 14 bytes
+    uint8_t buffer[14];
+    for (int i = 0; i < 14; i++) {
+        buffer[i] = Wire.read();
+    }
+    
+    // Parse accel (high byte first)
+    accelRaw[0] = (buffer[0] << 8) | buffer[1];
+    accelRaw[1] = (buffer[2] << 8) | buffer[3];
+    accelRaw[2] = (buffer[4] << 8) | buffer[5];
+    // Skip temp (bytes 6,7)
+    gyroRaw[0] = (buffer[8] << 8) | buffer[9];
+    gyroRaw[1] = (buffer[10] << 8) | buffer[11];
+    gyroRaw[2] = (buffer[12] << 8) | buffer[13];
     
     imuReadCount++;
     return true;
@@ -314,21 +390,50 @@ bool mpuRead() {
 
 void mpuCalibrate() {
     int32_t sa[3] = {0}, sg[3] = {0};
+    int good = 0;
+    
+#if DEBUG_ENABLED
+    Serial.println(F("  Sampling 500 readings..."));
+#endif
     
     for (int i = 0; i < 500; i++) {
-        mpuRead();
-        for (int j = 0; j < 3; j++) {
-            sa[j] += accelRaw[j];
-            sg[j] += gyroRaw[j];
+        if (mpuRead()) {
+            for (int j = 0; j < 3; j++) {
+                sa[j] += accelRaw[j];
+                sg[j] += gyroRaw[j];
+            }
+            good++;
         }
-        delay(2);
+        delay(4);
+    }
+    
+#if DEBUG_ENABLED
+    Serial.print(F("  Good samples: "));
+    Serial.println(good);
+#endif
+    
+    if (good < 100) {
+        // Not enough good readings
+        imuCalibrated = false;
+        return;
     }
     
     for (int j = 0; j < 3; j++) {
-        accelOff[j] = sa[j] / 500;
-        gyroOff[j] = sg[j] / 500;
+        accelOff[j] = sa[j] / good;
+        gyroOff[j] = sg[j] / good;
     }
     accelOff[2] -= 16384;  // Z should read 1g
+    
+#if DEBUG_ENABLED
+    Serial.print(F("  Accel offsets: "));
+    Serial.print(accelOff[0]); Serial.print(F(", "));
+    Serial.print(accelOff[1]); Serial.print(F(", "));
+    Serial.println(accelOff[2]);
+    Serial.print(F("  Gyro offsets: "));
+    Serial.print(gyroOff[0]); Serial.print(F(", "));
+    Serial.print(gyroOff[1]); Serial.print(F(", "));
+    Serial.println(gyroOff[2]);
+#endif
     
     imuCalibrated = true;
 }
