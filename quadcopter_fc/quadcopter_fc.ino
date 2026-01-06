@@ -361,13 +361,13 @@ void setup() {
     
     devStat = mpu.dmpInitialize();
     
-    // Set offsets (calibrate with IMU_Zero sketch and put values here)
-    mpu.setXGyroOffset(0);
-    mpu.setYGyroOffset(0);
-    mpu.setZGyroOffset(0);
-    mpu.setXAccelOffset(0);
-    mpu.setYAccelOffset(0);
-    mpu.setZAccelOffset(0);
+    // Offsets from IMU_Zero calibration
+    mpu.setXAccelOffset(-2366);
+    mpu.setYAccelOffset(755);
+    mpu.setZAccelOffset(-2006);
+    mpu.setXGyroOffset(10);
+    mpu.setYGyroOffset(21);
+    mpu.setZGyroOffset(-19);
     
     if (devStat == 0) {
 #if DEBUG
