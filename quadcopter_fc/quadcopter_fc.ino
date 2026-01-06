@@ -243,13 +243,28 @@ void dmpDataReady() {
 float baselinePressure = 0;
 float currentAltitude = 0;
 float altitudeFiltered = 0;
+float altitudePrev = 0;          // Previous filtered altitude for velocity calc
 float verticalVelocity = 0;
-float prevAltitude = 0;
+float verticalVelocityFiltered = 0;
 uint32_t prevAltTime = 0;
 bool baroReady = false;
 
-// Complementary filter for altitude
-constexpr float ALT_FILTER_ALPHA = 0.9f;
+// ============================================================================
+// ALTITUDE FILTERING CONFIGURATION
+// ============================================================================
+// Problem: Raw barometer is noisy, causes PID to overreact
+// Solution: Heavy filtering + rate limiting + output clamping
+
+constexpr float ALT_LPF_ALPHA = 0.85f;        // Altitude low-pass filter (0.85 = heavy smoothing)
+constexpr float VVEL_LPF_ALPHA = 0.80f;       // Velocity low-pass filter
+constexpr float ALT_MAX_CHANGE = 0.20f;       // Max altitude change per sample (meters)
+constexpr float VVEL_MAX = 3.0f;              // Max reasonable vertical velocity (m/s)
+constexpr float ALT_GROUND_THRESHOLD = 0.30f; // Below this = "on ground" (meters)
+constexpr float THROTTLE_GROUND_THRESHOLD = 200; // Below this throttle = likely on ground
+
+// Altitude PID output limits
+constexpr float ALT_PID_OUTPUT_MAX = 150.0f;  // Max ±150 microseconds
+constexpr float ALT_PID_RATE_LIMIT = 50.0f;   // Max change ±50 per cycle
 
 // ============================================================================
 // RADIO VARIABLES
@@ -375,7 +390,11 @@ public:
 PID pidRoll           (4.0f,  0.02f,  1.5f);   // Roll stabilization
 PID pidPitch          (4.0f,  0.02f,  1.5f);   // Pitch stabilization
 PID pidYaw            (3.0f,  0.01f,  0.0f);   // Yaw rate control
-PID pidAlt            (50.0f, 0.5f,   30.0f);  // Altitude hold
+
+// ALTITUDE PID - Very conservative values!
+// Output is limited to ±150µs and rate-limited to ±50µs/cycle
+// So these gains should be LOW to avoid saturation
+PID pidAlt            (15.0f, 0.1f,   8.0f);   // Altitude hold (reduced from 50/0.5/30)
 
 // ============================================================================
 // TIMING VARIABLES
@@ -509,14 +528,23 @@ void printStatus() {
     Serial.print(yawAngle, 1);
     Serial.println(F("°"));
     
-    // Barometer Data
+    // Barometer Data with more details
     if (baroReady) {
         Serial.print(F("ALT: "));
         Serial.print(altitudeFiltered, 2);
         Serial.print(F("m | Vvel: "));
         Serial.print(verticalVelocity, 2);
-        Serial.println(F("m/s"));
+        Serial.print(F("m/s | Target: "));
+        Serial.print(targetAltitude, 2);
+        Serial.print(F("m | PID: "));
+        Serial.println(altOutput, 1);
     }
+    
+    // Determine if altitude hold is actually active
+    bool onGround = (throttleCmd < THROTTLE_GROUND_THRESHOLD) || 
+                    (abs(altitudeFiltered) < ALT_GROUND_THRESHOLD && 
+                     abs(verticalVelocity) < 0.5f);
+    bool altHoldActive = altHoldEnabled && !onGround && baroReady;
     
     // Control Inputs
     Serial.print(F("CMD: Thr="));
@@ -528,7 +556,11 @@ void printStatus() {
     Serial.print(F(" Y="));
     Serial.print(yawRateCmd, 1);
     Serial.print(F(" AltHold="));
-    Serial.println(altHoldEnabled ? "ON" : "OFF");
+    if (altHoldEnabled) {
+        Serial.println(altHoldActive ? "ACTIVE" : "GROUND(disabled)");
+    } else {
+        Serial.println(F("OFF"));
+    }
     
     // Motor Outputs
     Serial.print(F("MTR: FL="));
@@ -752,22 +784,60 @@ void updateBarometer() {
     baro.read();
     float pressure = baro.getPressure();
     
-    // Calculate altitude using barometric formula
-    // altitude = 44330 * (1 - (P/P0)^0.1903)
-    currentAltitude = 44330.0f * (1.0f - pow(pressure / baselinePressure, 0.1903f));
-    
-    // Apply complementary filter
-    altitudeFiltered = ALT_FILTER_ALPHA * altitudeFiltered + (1.0f - ALT_FILTER_ALPHA) * currentAltitude;
-    
-    // Calculate vertical velocity
-    uint32_t now = micros();
-    if (prevAltTime > 0) {
-        float dt = (now - prevAltTime) / 1000000.0f;
-        if (dt > 0 && dt < 0.1f) {
-            verticalVelocity = (altitudeFiltered - prevAltitude) / dt;
-        }
+    // Sanity check pressure reading
+    if (pressure < 300 || pressure > 1200) {
+        // Invalid reading, skip this sample
+        return;
     }
-    prevAltitude = altitudeFiltered;
+    
+    // Calculate raw altitude using barometric formula
+    // altitude = 44330 * (1 - (P/P0)^0.1903)
+    float rawAltitude = 44330.0f * (1.0f - pow(pressure / baselinePressure, 0.1903f));
+    
+    // ========================================================================
+    // STEP 1: Rate-limit the raw altitude change
+    // Prevents single bad readings from causing huge jumps
+    // ========================================================================
+    float altChange = rawAltitude - currentAltitude;
+    
+    // Clamp maximum change per sample to ±0.2m
+    if (altChange > ALT_MAX_CHANGE) {
+        altChange = ALT_MAX_CHANGE;
+    } else if (altChange < -ALT_MAX_CHANGE) {
+        altChange = -ALT_MAX_CHANGE;
+    }
+    
+    currentAltitude += altChange;
+    
+    // ========================================================================
+    // STEP 2: Apply heavy low-pass filter to altitude
+    // This smooths out the noise before any PID sees it
+    // ========================================================================
+    altitudeFiltered = ALT_LPF_ALPHA * altitudeFiltered + (1.0f - ALT_LPF_ALPHA) * currentAltitude;
+    
+    // ========================================================================
+    // STEP 3: Calculate vertical velocity from FILTERED altitude only
+    // Derivative of barometer = apparent velocity
+    // ========================================================================
+    uint32_t now = micros();
+    float dt = (now - prevAltTime) / 1000000.0f;
+    
+    if (prevAltTime > 0 && dt > 0.01f && dt < 0.1f) {
+        // Calculate raw velocity from filtered altitude derivative
+        float rawVelocity = (altitudeFiltered - altitudePrev) / dt;
+        
+        // Clamp velocity to reasonable range
+        rawVelocity = constrain(rawVelocity, -VVEL_MAX, VVEL_MAX);
+        
+        // Apply low-pass filter to velocity
+        verticalVelocityFiltered = VVEL_LPF_ALPHA * verticalVelocityFiltered + 
+                                   (1.0f - VVEL_LPF_ALPHA) * rawVelocity;
+        
+        // Use filtered velocity
+        verticalVelocity = verticalVelocityFiltered;
+    }
+    
+    altitudePrev = altitudeFiltered;
     prevAltTime = now;
 }
 
@@ -905,6 +975,9 @@ void processCommands() {
     prevTestSwitch = testSwitch;
 }
 
+// Previous altitude output for rate limiting
+float prevAltOutput = 0;
+
 void updatePID() {
     if (!motorsArmed) {
         // Reset PIDs when disarmed
@@ -916,6 +989,7 @@ void updatePID() {
         pitchOutput = 0;
         yawOutput = 0;
         altOutput = 0;
+        prevAltOutput = 0;
         return;
     }
     
@@ -926,20 +1000,82 @@ void updatePID() {
     // Yaw: Rate mode
     yawOutput = pidYaw.compute(yawRateCmd, yawRate, Timing::PID_DT);
     
-    // Altitude hold
-    if (altHoldEnabled) {
+    // ========================================================================
+    // ALTITUDE HOLD - WITH GROUND DETECTION AND OUTPUT LIMITING
+    // ========================================================================
+    
+    // Determine if we're on the ground
+    bool onGround = (throttleCmd < THROTTLE_GROUND_THRESHOLD) || 
+                    (abs(altitudeFiltered) < ALT_GROUND_THRESHOLD && 
+                     abs(verticalVelocity) < 0.5f);
+    
+    // Disable altitude hold when on ground to prevent motor oscillation
+    bool altHoldActive = altHoldEnabled && !onGround && baroReady;
+    
+    if (altHoldActive) {
         // Adjust target altitude based on throttle deviation from center
         float throttleDeviation = throttleCmd - 500;  // Center = 500
         if (abs(throttleDeviation) > FlightParams::ALT_HOLD_DEADBAND) {
             // Throttle outside deadband - adjust target altitude
-            targetAltitude += (throttleDeviation / 500.0f) * 0.02f;  // Adjust rate
+            targetAltitude += (throttleDeviation / 500.0f) * 0.01f;  // Slower adjust rate
         }
         
         // PID for altitude
-        altOutput = pidAlt.compute(targetAltitude, altitudeFiltered, Timing::PID_DT);
+        float rawAltOutput = pidAlt.compute(targetAltitude, altitudeFiltered, Timing::PID_DT);
+        
+        // ====================================================================
+        // LIMIT 1: Clamp maximum PID output to ±150 microseconds
+        // ====================================================================
+        rawAltOutput = constrain(rawAltOutput, -ALT_PID_OUTPUT_MAX, ALT_PID_OUTPUT_MAX);
+        
+        // ====================================================================
+        // LIMIT 2: Rate limit - max change of ±50 per cycle
+        // Prevents sudden motor jumps from noisy readings
+        // ====================================================================
+        float outputChange = rawAltOutput - prevAltOutput;
+        if (outputChange > ALT_PID_RATE_LIMIT) {
+            outputChange = ALT_PID_RATE_LIMIT;
+        } else if (outputChange < -ALT_PID_RATE_LIMIT) {
+            outputChange = -ALT_PID_RATE_LIMIT;
+        }
+        
+        altOutput = prevAltOutput + outputChange;
+        prevAltOutput = altOutput;
+        
     } else {
+        // Not in altitude hold mode - reset
         altOutput = 0;
+        prevAltOutput = 0;
+        pidAlt.reset();
+        
+        // Update target altitude to current altitude when not active
+        // So when we enable it, we hold current altitude
+        if (altHoldEnabled) {
+            targetAltitude = altitudeFiltered;
+        }
     }
+}
+
+// Previous motor values for rate limiting
+uint16_t prevMotorFL = FlightParams::ESC_MIN_US;
+uint16_t prevMotorFR = FlightParams::ESC_MIN_US;
+uint16_t prevMotorRL = FlightParams::ESC_MIN_US;
+uint16_t prevMotorRR = FlightParams::ESC_MIN_US;
+
+// Motor rate limit (max change per cycle)
+constexpr int16_t MOTOR_RATE_LIMIT = 50;  // ±50 microseconds per cycle
+
+// Helper function to rate-limit motor output
+uint16_t rateLimitMotor(uint16_t target, uint16_t previous) {
+    int16_t change = (int16_t)target - (int16_t)previous;
+    
+    if (change > MOTOR_RATE_LIMIT) {
+        change = MOTOR_RATE_LIMIT;
+    } else if (change < -MOTOR_RATE_LIMIT) {
+        change = -MOTOR_RATE_LIMIT;
+    }
+    
+    return previous + change;
 }
 
 void updateMotors() {
@@ -949,14 +1085,30 @@ void updateMotors() {
         motorFR_us = FlightParams::ESC_MIN_US;
         motorRL_us = FlightParams::ESC_MIN_US;
         motorRR_us = FlightParams::ESC_MIN_US;
+        
+        // Reset previous values
+        prevMotorFL = FlightParams::ESC_MIN_US;
+        prevMotorFR = FlightParams::ESC_MIN_US;
+        prevMotorRL = FlightParams::ESC_MIN_US;
+        prevMotorRR = FlightParams::ESC_MIN_US;
     } else {
+        // Determine if altitude hold is actually active
+        bool onGround = (throttleCmd < THROTTLE_GROUND_THRESHOLD) || 
+                        (abs(altitudeFiltered) < ALT_GROUND_THRESHOLD && 
+                         abs(verticalVelocity) < 0.5f);
+        bool altHoldActive = altHoldEnabled && !onGround && baroReady;
+        
         // Calculate base throttle
         int16_t baseThrottle;
-        if (altHoldEnabled) {
-            // Altitude hold: use PID output + hover throttle estimate
-            baseThrottle = 500 + (int16_t)altOutput;  // 500 = approximate hover
+        if (altHoldActive) {
+            // Altitude hold: use manual throttle + altitude PID correction
+            // The throttle provides the "hover estimate", altOutput provides correction
+            baseThrottle = map(throttleCmd, 0, 1000, 
+                              FlightParams::ESC_IDLE_US, FlightParams::ESC_MAX_US);
+            baseThrottle -= FlightParams::ESC_MIN_US;  // Make relative
+            baseThrottle += (int16_t)altOutput;  // Add altitude correction
         } else {
-            // Manual throttle
+            // Manual throttle only
             baseThrottle = map(throttleCmd, 0, 1000, 
                               FlightParams::ESC_IDLE_US, FlightParams::ESC_MAX_US);
             baseThrottle -= FlightParams::ESC_MIN_US;  // Make relative to min
@@ -975,10 +1127,25 @@ void updateMotors() {
         int16_t rr = baseThrottle + (int16_t)rollOutput - (int16_t)pitchOutput - (int16_t)yawOutput;
         
         // Convert to PWM and constrain
-        motorFL_us = constrain(fl + FlightParams::ESC_MIN_US, FlightParams::ESC_IDLE_US, FlightParams::ESC_MAX_US);
-        motorFR_us = constrain(fr + FlightParams::ESC_MIN_US, FlightParams::ESC_IDLE_US, FlightParams::ESC_MAX_US);
-        motorRL_us = constrain(rl + FlightParams::ESC_MIN_US, FlightParams::ESC_IDLE_US, FlightParams::ESC_MAX_US);
-        motorRR_us = constrain(rr + FlightParams::ESC_MIN_US, FlightParams::ESC_IDLE_US, FlightParams::ESC_MAX_US);
+        uint16_t targetFL = constrain(fl + FlightParams::ESC_MIN_US, FlightParams::ESC_IDLE_US, FlightParams::ESC_MAX_US);
+        uint16_t targetFR = constrain(fr + FlightParams::ESC_MIN_US, FlightParams::ESC_IDLE_US, FlightParams::ESC_MAX_US);
+        uint16_t targetRL = constrain(rl + FlightParams::ESC_MIN_US, FlightParams::ESC_IDLE_US, FlightParams::ESC_MAX_US);
+        uint16_t targetRR = constrain(rr + FlightParams::ESC_MIN_US, FlightParams::ESC_IDLE_US, FlightParams::ESC_MAX_US);
+        
+        // ====================================================================
+        // RATE LIMIT: Max ±50 microseconds change per cycle
+        // This prevents sudden motor jumps that cause vibration
+        // ====================================================================
+        motorFL_us = rateLimitMotor(targetFL, prevMotorFL);
+        motorFR_us = rateLimitMotor(targetFR, prevMotorFR);
+        motorRL_us = rateLimitMotor(targetRL, prevMotorRL);
+        motorRR_us = rateLimitMotor(targetRR, prevMotorRR);
+        
+        // Save for next cycle
+        prevMotorFL = motorFL_us;
+        prevMotorFR = motorFR_us;
+        prevMotorRL = motorRL_us;
+        prevMotorRR = motorRR_us;
     }
     
     // Write to ESCs
@@ -1072,8 +1239,11 @@ void setup() {
     pidPitch.outputMax = 500;
     pidYaw.outputMin = -300;
     pidYaw.outputMax = 300;
-    pidAlt.outputMin = -300;
-    pidAlt.outputMax = 300;
+    
+    // Altitude PID limits - must match ALT_PID_OUTPUT_MAX
+    pidAlt.outputMin = -ALT_PID_OUTPUT_MAX;  // -150
+    pidAlt.outputMax = ALT_PID_OUTPUT_MAX;   // +150
+    pidAlt.integralMax = 50.0f;  // Limit integral windup
     
     // Set initial state
     if (initOk) {
