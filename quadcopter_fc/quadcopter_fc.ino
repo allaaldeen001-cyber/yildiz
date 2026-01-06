@@ -429,18 +429,33 @@ void updateBarometer() {
 // ============================================================================
 
 void updateRadio() {
+    // Check for available data
     if (radio.available()) {
         ControlPacket packet;
         radio.read(&packet, sizeof(packet));
+        
+#if ENABLE_DEBUG
+        // Show we received something
+        static uint32_t lastRxDebug = 0;
+        if (millis() - lastRxDebug > 500) {
+            lastRxDebug = millis();
+            Serial.print(F("RX: thr="));
+            Serial.print(packet.throttle);
+            Serial.print(F(" chk="));
+            Serial.print(packet.isValid() ? F("OK") : F("BAD"));
+            Serial.println();
+        }
+#endif
         
         if (packet.isValid()) {
             rxPacket = packet;
             lastPacketTime = millis();
             packetCount++;
             
-            // First connection
+            // First connection - play sound
             if (!radioConnected) {
                 radioConnected = true;
+                Serial.println(F("\n*** RF PAIRED! ***"));
                 soundPaired();
             }
         }
@@ -449,6 +464,7 @@ void updateRadio() {
     // Check for timeout
     if (radioConnected && (millis() - lastPacketTime > RF_TIMEOUT_MS)) {
         radioConnected = false;
+        Serial.println(F("\n*** RF LOST! ***"));
         
         if (flightState == STATE_ARMED) {
             flightState = STATE_FAILSAFE;
@@ -460,6 +476,62 @@ void updateRadio() {
 // ============================================================================
 //                        COMMAND PROCESSING
 // ============================================================================
+
+// Motor test state
+bool motorTestActive = false;
+bool prevMotorTestBtn = false;
+uint32_t motorTestStart = 0;
+uint8_t motorTestPhase = 0;
+
+void runMotorTest() {
+    // Run motors one by one at idle speed
+    uint32_t elapsed = millis() - motorTestStart;
+    uint16_t testSpeed = ESC_IDLE_US + 50;  // Slightly above idle
+    
+    // Each motor runs for 500ms
+    if (elapsed < 500) {
+        motorTestPhase = 0;
+        escFL.writeMicroseconds(testSpeed);
+        escFR.writeMicroseconds(ESC_MIN_US);
+        escRL.writeMicroseconds(ESC_MIN_US);
+        escRR.writeMicroseconds(ESC_MIN_US);
+    } else if (elapsed < 1000) {
+        motorTestPhase = 1;
+        escFL.writeMicroseconds(ESC_MIN_US);
+        escFR.writeMicroseconds(testSpeed);
+        escRL.writeMicroseconds(ESC_MIN_US);
+        escRR.writeMicroseconds(ESC_MIN_US);
+    } else if (elapsed < 1500) {
+        motorTestPhase = 2;
+        escFL.writeMicroseconds(ESC_MIN_US);
+        escFR.writeMicroseconds(ESC_MIN_US);
+        escRL.writeMicroseconds(testSpeed);
+        escRR.writeMicroseconds(ESC_MIN_US);
+    } else if (elapsed < 2000) {
+        motorTestPhase = 3;
+        escFL.writeMicroseconds(ESC_MIN_US);
+        escFR.writeMicroseconds(ESC_MIN_US);
+        escRL.writeMicroseconds(ESC_MIN_US);
+        escRR.writeMicroseconds(testSpeed);
+    } else if (elapsed < 2500) {
+        // All motors together
+        motorTestPhase = 4;
+        escFL.writeMicroseconds(testSpeed);
+        escFR.writeMicroseconds(testSpeed);
+        escRL.writeMicroseconds(testSpeed);
+        escRR.writeMicroseconds(testSpeed);
+    } else {
+        // Done
+        motorTestActive = false;
+        motorTestPhase = 0;
+        escFL.writeMicroseconds(ESC_MIN_US);
+        escFR.writeMicroseconds(ESC_MIN_US);
+        escRL.writeMicroseconds(ESC_MIN_US);
+        escRR.writeMicroseconds(ESC_MIN_US);
+        beep(200, 2500);
+        Serial.println(F("Motor test complete"));
+    }
+}
 
 void processCommands() {
     if (!radioConnected) {
@@ -476,7 +548,27 @@ void processCommands() {
     
     // Extract switches
     bool armSwitch = rxPacket.switches & (1 << SW_ARM);
+    bool motorTestBtn = rxPacket.switches & (1 << SW_MOTORTEST);  // D5 on remote
+    bool calibBtn = rxPacket.switches & (1 << SW_CALIBRATE);      // D4 on remote
     altHoldSwitch = rxPacket.switches & (1 << SW_ALTHOLD);
+    
+    // Motor test with D4 (calibrate) or D5 (motor test) - only when DISARMED
+    if ((calibBtn || motorTestBtn) && !prevMotorTestBtn && flightState == STATE_DISARMED) {
+        if (!motorTestActive) {
+            motorTestActive = true;
+            motorTestStart = millis();
+            motorTestPhase = 0;
+            Serial.println(F("Motor test started!"));
+            beep(100, 2000);
+        }
+    }
+    prevMotorTestBtn = calibBtn || motorTestBtn;
+    
+    // Run motor test if active
+    if (motorTestActive) {
+        runMotorTest();
+        return;  // Don't process other commands during test
+    }
     
     // Arm logic
     if (armSwitch && !prevArmSwitch && flightState == STATE_DISARMED) {
@@ -489,12 +581,17 @@ void processCommands() {
             pidAlt.reset();
             altOutputPrev = 0;
             targetAltitude = altitudeFiltered;
+            Serial.println(F("*** ARMED ***"));
             soundArmed();
+        } else {
+            Serial.println(F("Cannot arm! Check: throttle low, RF connected, DMP ready"));
+            beep(200, 500);
         }
     } 
     // Disarm
     else if (!armSwitch && flightState == STATE_ARMED) {
         flightState = STATE_DISARMED;
+        Serial.println(F("*** DISARMED ***"));
         soundDisarmed();
     }
     
@@ -502,6 +599,7 @@ void processCommands() {
     if (flightState == STATE_FAILSAFE) {
         if (!armSwitch || (radioConnected && throttleCmd < 100)) {
             flightState = STATE_DISARMED;
+            Serial.println(F("Failsafe recovered"));
             beep(200, 1500);
         }
     }
@@ -647,9 +745,26 @@ void printDebug() {
         default:             Serial.print(F("DIS ")); break;
     }
     
-    // RF
+    // RF status
     Serial.print(F(" RF:"));
-    Serial.print(radioConnected ? packetCount : 0);
+    if (radioConnected) {
+        Serial.print(F("OK("));
+        Serial.print(packetCount);
+        Serial.print(F(")"));
+    } else {
+        Serial.print(F("--"));
+    }
+    
+    // Switches from RC
+    Serial.print(F(" SW:"));
+    Serial.print((rxPacket.switches & 1) ? F("A") : F("-"));      // Arm
+    Serial.print((rxPacket.switches & 2) ? F("C") : F("-"));      // Calib
+    Serial.print((rxPacket.switches & 4) ? F("M") : F("-"));      // Motor
+    Serial.print((rxPacket.switches & 8) ? F("H") : F("-"));      // AltHold
+    
+    // RC commands
+    Serial.print(F(" Thr:"));
+    Serial.print(throttleCmd);
     
     // Angles
     Serial.print(F(" R:"));
@@ -662,13 +777,6 @@ void printDebug() {
     Serial.print((int)rollOutput);
     Serial.print(F(","));
     Serial.print((int)pitchOutput);
-    
-    // Altitude
-    if (baroReady) {
-        Serial.print(F(" Alt:"));
-        Serial.print(altitudeFiltered, 2);
-        Serial.print(altHoldActive ? F("*") : F(""));
-    }
     
     // Motors
     Serial.print(F(" M:"));
@@ -789,7 +897,7 @@ void setup() {
     radio.setChannel(RF_CHANNEL);
     radio.setDataRate(RF24_2MBPS);
     radio.setPALevel(RF24_PA_MAX);
-    radio.setPayloadSize(sizeof(ControlPacket));
+    radio.setPayloadSize(16);  // Fixed 16 bytes
     radio.setAutoAck(true);
     radio.setRetries(5, 3);
     radio.setCRCLength(RF24_CRC_16);
@@ -798,6 +906,12 @@ void setup() {
     
 #if ENABLE_DEBUG
     Serial.println(F("OK"));
+    Serial.print(F("  Channel: ")); Serial.println(RF_CHANNEL);
+    Serial.print(F("  Address: ")); 
+    for(int i=0; i<5; i++) { Serial.print((char)radioAddress[i]); }
+    Serial.println();
+    Serial.print(F("  Payload: 16 bytes"));
+    Serial.println();
 #endif
     
     // ---- Initialize ESCs ----

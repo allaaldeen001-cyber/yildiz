@@ -341,12 +341,18 @@ bool initRadio() {
     radio.setChannel(RF_CHANNEL);
     radio.setDataRate(RF24_2MBPS);
     radio.setPALevel(RF24_PA_MAX);
-    radio.setPayloadSize(sizeof(ControlPacket));
+    radio.setPayloadSize(16);  // Fixed 16 bytes - must match receiver!
     radio.setAutoAck(true);
-    radio.setRetries(5, 3);
+    radio.setRetries(5, 3);    // 5 = 1500us delay, 3 retries
     radio.setCRCLength(RF24_CRC_16);
     radio.openWritingPipe(radioAddress);
     radio.stopListening();
+    
+    Serial.print(F("  Channel: ")); Serial.println(RF_CHANNEL);
+    Serial.print(F("  Address: ")); 
+    for(int i=0; i<5; i++) { Serial.print((char)radioAddress[i]); }
+    Serial.println();
+    Serial.println(F("  Payload: 16 bytes"));
     
     return true;
 }
