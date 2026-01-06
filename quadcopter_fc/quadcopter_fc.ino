@@ -76,7 +76,7 @@
 #define THR_GROUND_THRESH   200
 #define ALT_PID_MAX         150.0f
 #define ALT_PID_RATE        50.0f
-#define MOTOR_RATE_LIMIT    50
+#define MOTOR_RATE_LIMIT    100    // INCREASED from 50 for faster response
 
 // ============================================================================
 // RF PACKET (16 bytes)
@@ -136,7 +136,9 @@ float roll = 0, pitch = 0, yaw = 0;
 bool imuReady = false, imuCalibrated = false;
 
 // Complementary filter
-#define COMP_ALPHA  0.98f
+// Lower = faster response to tilt, but more noise
+// Higher = smoother but slower response
+#define COMP_ALPHA  0.96f   // Reduced from 0.98 for faster tilt response
 
 // ============================================================================
 // BAROMETER VARIABLES  
@@ -213,11 +215,18 @@ public:
     }
 };
 
-// PID controllers
-PID pidRoll(4.0f, 0.02f, 1.5f);
-PID pidPitch(4.0f, 0.02f, 1.5f);
-PID pidYaw(3.0f, 0.01f, 0.0f);
-PID pidAlt(15.0f, 0.1f, 8.0f);
+// ============================================================================
+// PID TUNING - ADJUST THESE FOR YOUR QUAD!
+// ============================================================================
+// Increase Kp if response is too weak
+// Increase Kd if oscillating
+// Increase Ki if drifting
+
+//              Kp     Ki     Kd
+PID pidRoll  (6.0f,  0.03f,  2.5f);   // Roll  - INCREASED for stronger response
+PID pidPitch (6.0f,  0.03f,  2.5f);   // Pitch - INCREASED for stronger response
+PID pidYaw   (4.0f,  0.02f,  0.0f);   // Yaw rate
+PID pidAlt   (15.0f, 0.1f,   8.0f);   // Altitude
 
 // ============================================================================
 // MPU6050 FUNCTIONS
@@ -466,15 +475,26 @@ void processCommands() {
 // ============================================================================
 
 void updatePID(float dt) {
+    // ALWAYS calculate PID for roll/pitch (so we can see response in debug)
+    // This helps testing auto-level by hand without arming
+    
+    float tempRollOut = pidRoll.calc(rollCmd, roll, dt);
+    float tempPitchOut = pidPitch.calc(pitchCmd, pitch, dt);
+    float tempYawOut = pidYaw.calc(yawCmd, gyroDeg[2], dt);
+    
     if (state != ST_ARMED) {
-        pidRoll.reset(); pidPitch.reset(); pidYaw.reset(); pidAlt.reset();
-        rollOut = pitchOut = yawOut = altOut = prevAltOut = 0;
-        return;
+        // Store PID outputs for debug display, but don't apply to motors
+        rollOut = tempRollOut;
+        pitchOut = tempPitchOut;
+        yawOut = tempYawOut;
+        altOut = prevAltOut = 0;
+        return;  // Don't reset PID - keeps calculating for debug view
     }
     
-    rollOut = pidRoll.calc(rollCmd, roll, dt);
-    pitchOut = pidPitch.calc(pitchCmd, pitch, dt);
-    yawOut = pidYaw.calc(yawCmd, gyroDeg[2], dt);
+    // When armed, use the calculated values
+    rollOut = tempRollOut;
+    pitchOut = tempPitchOut;
+    yawOut = tempYawOut;
     
     // Ground detection
     bool onGround = (thrCmd < THR_GROUND_THRESH) || 
@@ -564,33 +584,48 @@ void updateLED() {
 
 #if DEBUG_ENABLED
 void printDebug() {
-    Serial.print(F("S:"));
-    Serial.print(state == ST_ARMED ? F("ARM") : state == ST_FAILSAFE ? F("FAIL") : F("DIS"));
+    Serial.println(F("----------------------------------------"));
     
-    Serial.print(F(" RF:"));
-    Serial.print(rfOK ? F("OK") : F("--"));
-    Serial.print(F(" P:"));
-    Serial.print(pktCount);
+    // State
+    Serial.print(F("State: "));
+    Serial.print(state == ST_ARMED ? F("ARMED") : state == ST_FAILSAFE ? F("FAILSAFE") : F("DISARMED"));
+    Serial.print(F("  RF: "));
+    Serial.println(rfOK ? F("Connected") : F("Disconnected"));
     
-    Serial.print(F(" R:"));
+    // Angles - TILT THE DRONE TO SEE THESE CHANGE
+    Serial.print(F("Angles -> Roll: "));
     Serial.print(roll, 1);
-    Serial.print(F(" P:"));
+    Serial.print(F("°  Pitch: "));
     Serial.print(pitch, 1);
+    Serial.print(F("°  Yaw: "));
+    Serial.print(yaw, 1);
+    Serial.println(F("°"));
     
-    Serial.print(F(" A:"));
-    Serial.print(altFiltered, 2);
-    Serial.print(F(" V:"));
-    Serial.print(vVel, 2);
+    // PID OUTPUT - THESE SHOULD CHANGE WHEN YOU TILT!
+    Serial.print(F("PID Out-> Roll: "));
+    Serial.print(rollOut, 0);
+    Serial.print(F("  Pitch: "));
+    Serial.print(pitchOut, 0);
+    Serial.print(F("  Yaw: "));
+    Serial.println(yawOut, 0);
     
-    Serial.print(F(" AH:"));
-    Serial.print(altHoldActive ? F("ON") : altHoldSw ? F("GND") : F("--"));
-    Serial.print(F(" AO:"));
-    Serial.print(altOut, 0);
+    // Command from RC
+    Serial.print(F("RC Cmd -> Thr: "));
+    Serial.print(thrCmd);
+    Serial.print(F("  Roll: "));
+    Serial.print(rollCmd, 0);
+    Serial.print(F("  Pitch: "));
+    Serial.print(pitchCmd, 0);
+    Serial.println();
     
-    Serial.print(F(" M:"));
-    Serial.print(mFL); Serial.print(F(","));
-    Serial.print(mFR); Serial.print(F(","));
-    Serial.print(mRL); Serial.print(F(","));
+    // Motors
+    Serial.print(F("Motors -> FL:"));
+    Serial.print(mFL);
+    Serial.print(F(" FR:"));
+    Serial.print(mFR);
+    Serial.print(F(" RL:"));
+    Serial.print(mRL);
+    Serial.print(F(" RR:"));
     Serial.println(mRR);
 }
 #endif
