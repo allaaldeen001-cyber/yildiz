@@ -339,20 +339,19 @@ bool initRadio() {
     }
     
     radio.setChannel(RF_CHANNEL);
-    radio.setDataRate(RF24_2MBPS);
+    radio.setDataRate(RF24_1MBPS);    // Slower = more reliable
     radio.setPALevel(RF24_PA_MAX);
-    radio.setPayloadSize(16);  // Fixed 16 bytes - must match receiver!
-    radio.setAutoAck(true);
-    radio.setRetries(5, 3);    // 5 = 1500us delay, 3 retries
+    radio.setPayloadSize(16);
+    radio.setAutoAck(false);          // NO ACK mode
+    radio.disableDynamicPayloads();
     radio.setCRCLength(RF24_CRC_16);
     radio.openWritingPipe(radioAddress);
     radio.stopListening();
     
+    Serial.println(F("  Mode: NO_ACK (reliable)"));
     Serial.print(F("  Channel: ")); Serial.println(RF_CHANNEL);
-    Serial.print(F("  Address: ")); 
-    for(int i=0; i<5; i++) { Serial.print((char)radioAddress[i]); }
+    Serial.print(F("  Speed: 1Mbps"));
     Serial.println();
-    Serial.println(F("  Payload: 16 bytes"));
     
     return true;
 }
@@ -376,30 +375,20 @@ bool sendPacket() {
     txPacket.reserved = 0;
     txPacket.calcChecksum();
     
-    // Send
+    // Send (NO_ACK mode - just transmit, don't wait for response)
+    radio.write(&txPacket, sizeof(txPacket), true);  // true = NO_ACK
     packetsSent++;
-    bool success = radio.write(&txPacket, sizeof(txPacket));
     
-    if (success) {
-        packetsAcked++;
-        lastAckTime = millis();
-        
-        if (!connected) {
-            connected = true;
-            Serial.println(F("\n*** CONNECTED TO DRONE! ***"));
-            soundConnected();
-        }
-        return true;
-    } else {
-        packetsFailed++;
-        
-        if (connected && millis() - lastAckTime > 500) {
-            connected = false;
-            Serial.println(F("\n*** CONNECTION LOST! ***"));
-            soundDisconnected();
-        }
-        return false;
+    // In NO_ACK mode, we assume connected if we're transmitting
+    // The drone will tell us if it receives packets via its serial output
+    if (!connected && packetsSent > 10) {
+        connected = true;
+        Serial.println(F("\n*** TRANSMITTING ***"));
+        Serial.println(F("Check DRONE serial for received packets"));
+        soundConnected();
     }
+    
+    return true;
 }
 
 // ============================================================================
@@ -436,24 +425,9 @@ void updateLED() {
 // ============================================================================
 
 void printDebug() {
-    // Connection status
-    Serial.print(connected ? F("CONN ") : F("---- "));
-    
-    // Packet stats
+    // Packet count
     Serial.print(F("TX:"));
     Serial.print(packetsSent);
-    Serial.print(F(" OK:"));
-    Serial.print(packetsAcked);
-    Serial.print(F(" FAIL:"));
-    Serial.print(packetsFailed);
-    
-    // Success rate
-    if (packetsSent > 0) {
-        float rate = (float)packetsAcked / packetsSent * 100.0f;
-        Serial.print(F(" ("));
-        Serial.print(rate, 1);
-        Serial.print(F("%)"));
-    }
     
     // Joystick values
     Serial.print(F(" | T:"));
@@ -466,10 +440,13 @@ void printDebug() {
     Serial.print(roll);
     
     // Switches
-    Serial.print(F(" | ARM:"));
-    Serial.print(swArm ? F("ON") : F("--"));
-    Serial.print(F(" ALT:"));
-    Serial.println(swAltHold ? F("ON") : F("--"));
+    Serial.print(F(" | SW:"));
+    Serial.print(swArm ? F("A") : F("-"));
+    Serial.print(btnCalib ? F("C") : F("-"));
+    Serial.print(btnMotor ? F("M") : F("-"));
+    Serial.print(swAltHold ? F("H") : F("-"));
+    
+    Serial.println();
 }
 
 // ============================================================================

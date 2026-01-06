@@ -429,42 +429,30 @@ void updateBarometer() {
 // ============================================================================
 
 void updateRadio() {
-    // Check for available data
-    if (radio.available()) {
+    // Check for available data (NO_ACK mode - just receive)
+    while (radio.available()) {
         ControlPacket packet;
         radio.read(&packet, sizeof(packet));
         
-#if ENABLE_DEBUG
-        // Show we received something
-        static uint32_t lastRxDebug = 0;
-        if (millis() - lastRxDebug > 500) {
-            lastRxDebug = millis();
-            Serial.print(F("RX: thr="));
-            Serial.print(packet.throttle);
-            Serial.print(F(" chk="));
-            Serial.print(packet.isValid() ? F("OK") : F("BAD"));
-            Serial.println();
-        }
-#endif
-        
+        // Validate checksum
         if (packet.isValid()) {
             rxPacket = packet;
             lastPacketTime = millis();
             packetCount++;
             
-            // First connection - play sound
+            // First packet received - we're paired!
             if (!radioConnected) {
                 radioConnected = true;
-                Serial.println(F("\n*** RF PAIRED! ***"));
+                Serial.println(F("\n***** RF CONNECTED! *****"));
                 soundPaired();
             }
         }
     }
     
-    // Check for timeout
+    // Timeout check - disarm if no packets for too long
     if (radioConnected && (millis() - lastPacketTime > RF_TIMEOUT_MS)) {
         radioConnected = false;
-        Serial.println(F("\n*** RF LOST! ***"));
+        Serial.println(F("\n***** RF LOST! *****"));
         
         if (flightState == STATE_ARMED) {
             flightState = STATE_FAILSAFE;
@@ -895,11 +883,11 @@ void setup() {
     }
     
     radio.setChannel(RF_CHANNEL);
-    radio.setDataRate(RF24_2MBPS);
+    radio.setDataRate(RF24_1MBPS);   // Slower = more reliable
     radio.setPALevel(RF24_PA_MAX);
-    radio.setPayloadSize(16);  // Fixed 16 bytes
-    radio.setAutoAck(true);
-    radio.setRetries(5, 3);
+    radio.setPayloadSize(16);
+    radio.setAutoAck(false);         // NO ACK - more reliable for control
+    radio.disableDynamicPayloads();
     radio.setCRCLength(RF24_CRC_16);
     radio.openReadingPipe(1, radioAddress);
     radio.startListening();
