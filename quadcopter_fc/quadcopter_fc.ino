@@ -92,7 +92,7 @@
 #define ESC_ARM_THROTTLE    50      // Max throttle to allow arming
 
 // Safety
-#define RF_TIMEOUT_MS       500     // Disarm after this many ms without signal
+#define RF_TIMEOUT_MS       1000    // Disarm after 1 second without signal (increased for stability)
 #define MOTOR_RATE_LIMIT    100     // Max motor change per cycle (µs)
 
 // Altitude hold
@@ -428,7 +428,13 @@ void updateBarometer() {
 //                           RADIO UPDATE
 // ============================================================================
 
+// Track consecutive missed packets for smoother disconnect detection
+uint8_t missedPacketCount = 0;
+#define MAX_MISSED_PACKETS  50    // 50 packets at 50Hz = 1 second
+
 void updateRadio() {
+    bool gotPacket = false;
+    
     // Check for available data (NO_ACK mode - just receive)
     while (radio.available()) {
         ControlPacket packet;
@@ -439,6 +445,8 @@ void updateRadio() {
             rxPacket = packet;
             lastPacketTime = millis();
             packetCount++;
+            missedPacketCount = 0;  // Reset missed counter
+            gotPacket = true;
             
             // First packet received - we're paired!
             if (!radioConnected) {
@@ -449,9 +457,15 @@ void updateRadio() {
         }
     }
     
-    // Timeout check - disarm if no packets for too long
-    if (radioConnected && (millis() - lastPacketTime > RF_TIMEOUT_MS)) {
+    // If no packet this cycle, increment miss counter
+    if (!gotPacket && radioConnected) {
+        missedPacketCount++;
+    }
+    
+    // Only disconnect after many consecutive misses (not just time)
+    if (radioConnected && missedPacketCount > MAX_MISSED_PACKETS) {
         radioConnected = false;
+        missedPacketCount = 0;
         Serial.println(F("\n***** RF LOST! *****"));
         
         if (flightState == STATE_ARMED) {

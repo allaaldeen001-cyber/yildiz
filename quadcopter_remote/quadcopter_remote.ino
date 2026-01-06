@@ -270,17 +270,58 @@ void readJoysticks() {
     roll = applyExpo(roll, EXPO_FACTOR);
 }
 
+// Debounced switch states
+bool debouncedArm = false;
+bool debouncedAltHold = false;
+bool debouncedCalib = false;
+bool debouncedMotor = false;
+uint32_t lastSwitchChange = 0;
+
 void readSwitches() {
     // Save previous states
     prevArm = swArm;
     prevCalib = btnCalib;
     prevMotor = btnMotor;
     
-    // Read switches (active LOW with pullup)
-    swArm = !digitalRead(PIN_SW_ARM);
-    swAltHold = !digitalRead(PIN_SW_ALTHOLD);
-    btnCalib = !digitalRead(PIN_BTN_CALIB);
-    btnMotor = !digitalRead(PIN_BTN_MOTOR);
+    // Read raw switches (active LOW with pullup)
+    bool rawArm = !digitalRead(PIN_SW_ARM);
+    bool rawAltHold = !digitalRead(PIN_SW_ALTHOLD);
+    bool rawCalib = !digitalRead(PIN_BTN_CALIB);
+    bool rawMotor = !digitalRead(PIN_BTN_MOTOR);
+    
+    // Simple debounce - only update if stable for 50ms
+    static bool lastRawArm = false;
+    static bool lastRawAltHold = false;
+    static uint32_t armStableTime = 0;
+    static uint32_t altHoldStableTime = 0;
+    
+    uint32_t now = millis();
+    
+    // Debounce ARM switch
+    if (rawArm != lastRawArm) {
+        armStableTime = now;
+        lastRawArm = rawArm;
+    } else if (now - armStableTime > 50) {
+        debouncedArm = rawArm;
+    }
+    
+    // Debounce ALT HOLD switch  
+    if (rawAltHold != lastRawAltHold) {
+        altHoldStableTime = now;
+        lastRawAltHold = rawAltHold;
+    } else if (now - altHoldStableTime > 50) {
+        debouncedAltHold = rawAltHold;
+    }
+    
+    // Buttons don't need debounce as much
+    debouncedCalib = rawCalib;
+    debouncedMotor = rawMotor;
+    
+    // Use debounced values
+    swArm = debouncedArm;
+    swAltHold = debouncedAltHold;
+    btnCalib = debouncedCalib;
+    btnMotor = debouncedMotor;
     
     // Edge detection with sound
     if (btnCalib && !prevCalib) {
