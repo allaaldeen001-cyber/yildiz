@@ -51,8 +51,7 @@
 // RF Channel (0-125) - MUST MATCH FLIGHT CONTROLLER!
 #define RF_CHANNEL          108
 
-// Serial debug
-#define ENABLE_DEBUG        1
+// Serial debug (always on for troubleshooting)
 #define SERIAL_BAUD         115200
 
 // ============================================================================
@@ -300,10 +299,8 @@ void readSwitches() {
 }
 
 void calibrateJoystickCenters() {
-#if ENABLE_DEBUG
     Serial.println(F("Calibrating joystick centers..."));
-    Serial.println(F("Keep sticks centered!"));
-#endif
+    Serial.println(F("Keep sticks CENTERED!"));
     
     beepBlocking(200, 1500);
     delay(500);
@@ -320,14 +317,12 @@ void calibrateJoystickCenters() {
     joyCal.pitchCenter = sum[1] / 50;
     joyCal.rollCenter = sum[2] / 50;
     
-#if ENABLE_DEBUG
-    Serial.print(F("Centers: Y="));
+    Serial.print(F("Calibration done! Centers: Yaw="));
     Serial.print(joyCal.yawCenter);
-    Serial.print(F(" P="));
+    Serial.print(F(" Pitch="));
     Serial.print(joyCal.pitchCenter);
-    Serial.print(F(" R="));
+    Serial.print(F(" Roll="));
     Serial.println(joyCal.rollCenter);
-#endif
     
     beepBlocking(100, 2000); delay(50);
     beepBlocking(100, 2500); delay(50);
@@ -385,9 +380,7 @@ bool sendPacket() {
         
         if (!connected) {
             connected = true;
-#if ENABLE_DEBUG
-            Serial.println(F("\n*** CONNECTED ***"));
-#endif
+            Serial.println(F("\n*** CONNECTED TO DRONE! ***"));
             soundConnected();
         }
         return true;
@@ -396,9 +389,7 @@ bool sendPacket() {
         
         if (connected && millis() - lastAckTime > 500) {
             connected = false;
-#if ENABLE_DEBUG
-            Serial.println(F("\n*** CONNECTION LOST ***"));
-#endif
+            Serial.println(F("\n*** CONNECTION LOST! ***"));
             soundDisconnected();
         }
         return false;
@@ -438,7 +429,6 @@ void updateLED() {
 //                           DEBUG OUTPUT
 // ============================================================================
 
-#if ENABLE_DEBUG
 void printDebug() {
     // Connection status
     Serial.print(connected ? F("CONN ") : F("---- "));
@@ -475,21 +465,25 @@ void printDebug() {
     Serial.print(F(" ALT:"));
     Serial.println(swAltHold ? F("ON") : F("--"));
 }
-#endif
 
 // ============================================================================
 //                              SETUP
 // ============================================================================
 
 void setup() {
-#if ENABLE_DEBUG
+    // ALWAYS init serial first for debugging
     Serial.begin(SERIAL_BAUD);
-    Serial.println(F("\n=== QuadRC v3.0 ==="));
+    delay(100);
+    Serial.println();
+    Serial.println(F("============================="));
+    Serial.println(F("   QUADCOPTER REMOTE v3.0"));
+    Serial.println(F("============================="));
     Serial.print(F("RF Channel: "));
     Serial.println(RF_CHANNEL);
-#endif
+    Serial.println();
     
     // Initialize pins
+    Serial.println(F("Init pins..."));
     pinMode(PIN_LED, OUTPUT);
     pinMode(PIN_BUZZER, OUTPUT);
     pinMode(PIN_SW_ARM, INPUT_PULLUP);
@@ -498,35 +492,63 @@ void setup() {
     pinMode(PIN_BTN_MOTOR, INPUT_PULLUP);
     
     digitalWrite(PIN_LED, HIGH);
+    Serial.println(F("Pins OK"));
     
+    // Startup beep
+    Serial.println(F("Buzzer test..."));
     soundStartup();
+    Serial.println(F("Buzzer OK"));
     
     // Initialize radio
-#if ENABLE_DEBUG
-    Serial.print(F("NRF24L01..."));
-#endif
+    Serial.println(F("Init NRF24L01..."));
+    Serial.print(F("  CE pin: ")); Serial.println(PIN_RF_CE);
+    Serial.print(F("  CSN pin: ")); Serial.println(PIN_RF_CSN);
     
     if (!initRadio()) {
-#if ENABLE_DEBUG
-        Serial.println(F("FAIL"));
-#endif
+        Serial.println(F("*** NRF24L01 FAILED! ***"));
+        Serial.println(F("Check wiring:"));
+        Serial.println(F("  VCC  -> 3.3V (NOT 5V!)"));
+        Serial.println(F("  GND  -> GND"));
+        Serial.println(F("  CE   -> D9"));
+        Serial.println(F("  CSN  -> D10"));
+        Serial.println(F("  SCK  -> D13"));
+        Serial.println(F("  MOSI -> D11"));
+        Serial.println(F("  MISO -> D12"));
+        Serial.println(F("Add 10-100uF capacitor on VCC!"));
+        
         while (1) {
+            digitalWrite(PIN_LED, !digitalRead(PIN_LED));
             beepBlocking(200, 500);
             delay(300);
         }
     }
     
-#if ENABLE_DEBUG
-    Serial.println(F("OK"));
-#endif
+    Serial.println(F("NRF24L01 OK!"));
+    
+    // Test reading joysticks
+    Serial.println(F("Testing joysticks..."));
+    Serial.print(F("  Throttle (A0): ")); Serial.println(analogRead(PIN_JOY_THROTTLE));
+    Serial.print(F("  Yaw (A1): ")); Serial.println(analogRead(PIN_JOY_YAW));
+    Serial.print(F("  Pitch (A2): ")); Serial.println(analogRead(PIN_JOY_PITCH));
+    Serial.print(F("  Roll (A3): ")); Serial.println(analogRead(PIN_JOY_ROLL));
+    
+    // Test switches
+    Serial.println(F("Testing switches..."));
+    Serial.print(F("  ARM (D2): ")); Serial.println(digitalRead(PIN_SW_ARM) ? "OFF" : "ON");
+    Serial.print(F("  ALT (D3): ")); Serial.println(digitalRead(PIN_SW_ALTHOLD) ? "OFF" : "ON");
+    Serial.print(F("  CAL (D4): ")); Serial.println(digitalRead(PIN_BTN_CALIB) ? "OFF" : "ON");
+    Serial.print(F("  MTR (D5): ")); Serial.println(digitalRead(PIN_BTN_MOTOR) ? "OFF" : "ON");
     
     // Calibrate joystick centers
+    Serial.println();
     calibrateJoystickCenters();
     
-#if ENABLE_DEBUG
-    Serial.println(F("\n*** READY ***"));
-    Serial.println(F("Searching for drone...\n"));
-#endif
+    Serial.println();
+    Serial.println(F("============================="));
+    Serial.println(F("       READY TO FLY!"));
+    Serial.println(F("============================="));
+    Serial.println(F("Transmitting to drone..."));
+    Serial.println();
     
     beepBlocking(100, 2000); delay(100);
     beepBlocking(100, 2500); delay(100);
@@ -561,10 +583,8 @@ void loop() {
     updateLED();
     
     // Debug output (4Hz)
-#if ENABLE_DEBUG
     if (now - timeDebug >= DEBUG_RATE_MS) {
         timeDebug = now;
         printDebug();
     }
-#endif
 }
