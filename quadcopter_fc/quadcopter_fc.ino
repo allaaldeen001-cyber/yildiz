@@ -134,6 +134,7 @@ int16_t accelOff[3], gyroOff[3];
 float accelG[3], gyroDeg[3];
 float roll = 0, pitch = 0, yaw = 0;
 bool imuReady = false, imuCalibrated = false;
+uint32_t imuReadCount = 0, imuFailCount = 0;  // Debug counters
 
 // Complementary filter
 // Lower = faster response to tilt, but more noise
@@ -241,19 +242,45 @@ void mpuWrite(uint8_t reg, uint8_t val) {
 
 bool mpuInit() {
     Wire.begin();
-    Wire.setClock(400000);
+    Wire.setClock(400000);  // 400kHz I2C
+    delay(50);  // Wait for I2C to stabilize
+    
+    // Reset I2C if stuck
+    Wire.beginTransmission(MPU_ADDR);
+    Wire.endTransmission(true);
+    delay(10);
     
     // Check connection
     Wire.beginTransmission(MPU_ADDR);
-    if (Wire.endTransmission() != 0) return false;
+    if (Wire.endTransmission() != 0) {
+        // Try again with slower clock
+        Wire.setClock(100000);  // Try 100kHz
+        delay(10);
+        Wire.beginTransmission(MPU_ADDR);
+        if (Wire.endTransmission() != 0) return false;
+    }
+    
+    // Reset MPU6050
+    mpuWrite(REG_PWR_MGMT, 0x80);   // Device reset
+    delay(100);                     // Wait for reset
     
     mpuWrite(REG_PWR_MGMT, 0x00);   // Wake up
     delay(10);
     mpuWrite(REG_PWR_MGMT, 0x01);   // PLL with X gyro
+    delay(10);
     mpuWrite(REG_SMPLRT, 0x00);     // 1kHz sample rate
     mpuWrite(REG_CONFIG, 0x03);     // 44Hz DLPF
     mpuWrite(REG_GYRO_CFG, 0x00);   // ±250°/s
     mpuWrite(REG_ACCEL_CFG, 0x00);  // ±2g
+    delay(10);
+    
+    // Verify we can read
+    if (!mpuRead()) return false;
+    
+    // Check if we get non-zero values (at least Z accel should be ~16384)
+    if (accelRaw[0] == 0 && accelRaw[1] == 0 && accelRaw[2] == 0) {
+        return false;  // Sensor not responding properly
+    }
     
     return true;
 }
@@ -261,10 +288,17 @@ bool mpuInit() {
 bool mpuRead() {
     Wire.beginTransmission(MPU_ADDR);
     Wire.write(REG_ACCEL_OUT);
-    if (Wire.endTransmission(false) != 0) return false;
+    uint8_t error = Wire.endTransmission(false);
+    if (error != 0) {
+        imuFailCount++;
+        return false;
+    }
     
-    Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)14);
-    if (Wire.available() < 14) return false;
+    uint8_t count = Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)14);
+    if (count < 14) {
+        imuFailCount++;
+        return false;
+    }
     
     accelRaw[0] = (Wire.read() << 8) | Wire.read();
     accelRaw[1] = (Wire.read() << 8) | Wire.read();
@@ -274,6 +308,7 @@ bool mpuRead() {
     gyroRaw[1] = (Wire.read() << 8) | Wire.read();
     gyroRaw[2] = (Wire.read() << 8) | Wire.read();
     
+    imuReadCount++;
     return true;
 }
 
@@ -462,9 +497,14 @@ void processCommands() {
         tone(PIN_BUZZER, 1500, 300);
     }
     
-    // Failsafe recovery
-    if (!armSw && state == ST_FAILSAFE) {
-        state = ST_DISARMED;
+    // Failsafe recovery - can recover when:
+    // 1. Arm switch is OFF, OR
+    // 2. RF reconnected and throttle is low
+    if (state == ST_FAILSAFE) {
+        if (!armSw || (rfOK && thrCmd < 100)) {
+            state = ST_DISARMED;
+            tone(PIN_BUZZER, 1500, 200);  // Recovery beep
+        }
     }
     
     prevArm = armSw;
@@ -584,48 +624,62 @@ void updateLED() {
 
 #if DEBUG_ENABLED
 void printDebug() {
-    Serial.println(F("----------------------------------------"));
+    Serial.println(F("========================================"));
     
-    // State
+    // State and RF
     Serial.print(F("State: "));
     Serial.print(state == ST_ARMED ? F("ARMED") : state == ST_FAILSAFE ? F("FAILSAFE") : F("DISARMED"));
-    Serial.print(F("  RF: "));
-    Serial.println(rfOK ? F("Connected") : F("Disconnected"));
+    Serial.print(F("  |  RF: "));
+    Serial.print(rfOK ? F("OK") : F("LOST"));
+    Serial.print(F("  Pkts: "));
+    Serial.println(pktCount);
+    
+    // IMU STATUS - KEY DIAGNOSTIC!
+    Serial.print(F("IMU: Reads="));
+    Serial.print(imuReadCount);
+    Serial.print(F(" Fails="));
+    Serial.print(imuFailCount);
+    Serial.print(F("  |  Raw Accel: "));
+    Serial.print(accelRaw[0]);
+    Serial.print(F(","));
+    Serial.print(accelRaw[1]);
+    Serial.print(F(","));
+    Serial.println(accelRaw[2]);
     
     // Angles - TILT THE DRONE TO SEE THESE CHANGE
-    Serial.print(F("Angles -> Roll: "));
+    Serial.print(F("Angles: Roll="));
     Serial.print(roll, 1);
-    Serial.print(F("°  Pitch: "));
+    Serial.print(F("° Pitch="));
     Serial.print(pitch, 1);
-    Serial.print(F("°  Yaw: "));
+    Serial.print(F("° Yaw="));
     Serial.print(yaw, 1);
     Serial.println(F("°"));
     
-    // PID OUTPUT - THESE SHOULD CHANGE WHEN YOU TILT!
-    Serial.print(F("PID Out-> Roll: "));
+    // PID OUTPUT
+    Serial.print(F("PID: R="));
     Serial.print(rollOut, 0);
-    Serial.print(F("  Pitch: "));
+    Serial.print(F(" P="));
     Serial.print(pitchOut, 0);
-    Serial.print(F("  Yaw: "));
+    Serial.print(F(" Y="));
     Serial.println(yawOut, 0);
     
-    // Command from RC
-    Serial.print(F("RC Cmd -> Thr: "));
+    // RC Commands
+    Serial.print(F("RC: Thr="));
     Serial.print(thrCmd);
-    Serial.print(F("  Roll: "));
+    Serial.print(F(" R="));
     Serial.print(rollCmd, 0);
-    Serial.print(F("  Pitch: "));
+    Serial.print(F(" P="));
     Serial.print(pitchCmd, 0);
     Serial.println();
     
     // Motors
-    Serial.print(F("Motors -> FL:"));
+    Serial.print(F("Motors: "));
     Serial.print(mFL);
-    Serial.print(F(" FR:"));
+    Serial.print(F(","));
     Serial.print(mFR);
-    Serial.print(F(" RL:"));
+    Serial.print(F(","));
     Serial.print(mRL);
-    Serial.print(F(" RR:"));
+    Serial.print(F(","));
     Serial.println(mRR);
 }
 #endif
@@ -736,6 +790,16 @@ void loop() {
         if (mpuRead()) {
             mpuProcess();
             updateAttitude(dt);
+        } else {
+            // I2C might be stuck - try to recover
+            static uint32_t lastRecovery = 0;
+            if (millis() - lastRecovery > 1000) {  // Try recovery every 1 second
+                lastRecovery = millis();
+                Wire.end();
+                delay(1);
+                Wire.begin();
+                Wire.setClock(400000);
+            }
         }
     }
     
