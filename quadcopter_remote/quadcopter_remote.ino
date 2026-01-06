@@ -1,33 +1,51 @@
 /**
  * ============================================================================
- * QUADCOPTER REMOTE CONTROLLER FIRMWARE
+ * QUADCOPTER REMOTE CONTROLLER FIRMWARE v2.0
  * ============================================================================
  * 
  * Target: Arduino Nano (ATmega328P @ 16MHz)
  * 
+ * Features:
+ *   - NRF24L01 with ACK mode for reliable communication
+ *   - Serial debug output for monitoring
+ *   - Joystick calibration
+ *   - Visual and audio feedback
+ * 
  * Hardware Configuration:
  *   NRF24L01: CE → D9, CSN → D10
  *   Toggle Switch (Arm): D2
- *   Toggle Switch (Aux): D3
+ *   Toggle Switch (Alt Hold): D3
  *   Push Button (Calibrate): D4
  *   Push Button (Motor Test): D5
  *   Joystick Throttle: A0
  *   Joystick Yaw: A1
  *   Joystick Pitch: A2
  *   Joystick Roll: A3
- *   Buzzer (optional): D6
- *   Battery Voltage: A6 (optional)
+ *   Buzzer: D6
+ *   LED: D7
  * 
- * Transmission Rate: 50 Hz
+ * Required Libraries:
+ *   - RF24 (TMRh20): https://github.com/nRF24/RF24
  * 
  * Author: Flight Control Systems
- * Version: 1.0.0
+ * Version: 2.0.0
  * 
  * ============================================================================
  */
 
 #include <SPI.h>
 #include <RF24.h>
+
+// ============================================================================
+// CONFIGURATION - MUST MATCH FLIGHT CONTROLLER!
+// ============================================================================
+
+// RF Channel - MUST MATCH FLIGHT CONTROLLER
+#define RF_CHANNEL          108
+
+// Enable serial debug output
+#define DEBUG_SERIAL        true
+#define SERIAL_BAUD         115200
 
 // ============================================================================
 // HARDWARE PIN DEFINITIONS
@@ -38,9 +56,9 @@ namespace Pins {
     constexpr uint8_t RF_CE  = 9;
     constexpr uint8_t RF_CSN = 10;
     
-    // Digital Inputs
+    // Digital Inputs (active LOW with pull-up)
     constexpr uint8_t SW_ARM      = 2;   // Toggle switch - Arm/Disarm
-    constexpr uint8_t SW_AUX      = 3;   // Toggle switch - Auxiliary
+    constexpr uint8_t SW_ALTHOLD  = 3;   // Toggle switch - Altitude Hold
     constexpr uint8_t BTN_CALIB   = 4;   // Push button - Calibration
     constexpr uint8_t BTN_MOTOR   = 5;   // Push button - Motor test
     
@@ -50,43 +68,59 @@ namespace Pins {
     constexpr uint8_t JOY_PITCH    = A2;
     constexpr uint8_t JOY_ROLL     = A3;
     
-    // Optional
-    constexpr uint8_t BUZZER      = 6;
-    constexpr uint8_t BATT_SENSE  = A6;
+    // User Interface
+    constexpr uint8_t BUZZER = 6;
+    constexpr uint8_t LED    = 7;
 }
 
 // ============================================================================
-// RF CONFIGURATION (Must match Flight Controller)
+// TIMING CONFIGURATION
+// ============================================================================
+
+namespace Timing {
+    constexpr uint32_t TX_PERIOD_MS     = 20;     // 50 Hz transmission
+    constexpr uint32_t INPUT_PERIOD_MS  = 10;     // 100 Hz input sampling
+    constexpr uint32_t DEBUG_PERIOD_MS  = 250;    // 4 Hz debug output
+    constexpr uint32_t LED_PERIOD_MS    = 500;    // LED blink rate
+    constexpr uint32_t DEBOUNCE_MS      = 50;     // Button debounce
+}
+
+// ============================================================================
+// RF CONFIGURATION - MUST MATCH FLIGHT CONTROLLER!
 // ============================================================================
 
 namespace RFConfig {
-    constexpr uint8_t CHANNEL = 108;
+    constexpr uint8_t CHANNEL = RF_CHANNEL;
     constexpr uint8_t PAYLOAD_SIZE = 16;
-    const uint8_t ADDRESS[6] = "QUAD1";
+    const uint8_t PIPE_ADDRESS[6] = "QUAD1";  // 5-byte address + null
+    
+    // ACK configuration
+    constexpr uint8_t RETRY_DELAY = 5;   // 5 = 1500us delay
+    constexpr uint8_t RETRY_COUNT = 3;   // 3 retries
     
     // Switch bit definitions
     constexpr uint8_t SW_ARM_BIT       = 0;
     constexpr uint8_t SW_CALIBRATE_BIT = 1;
     constexpr uint8_t SW_MOTORTEST_BIT = 2;
-    constexpr uint8_t SW_AUX_BIT       = 3;
+    constexpr uint8_t SW_ALTHOLD_BIT   = 3;
 }
 
-// Control packet structure (16 bytes) - Must match FC
+// Control packet structure (16 bytes) - MUST MATCH RECEIVER
 struct __attribute__((packed)) ControlPacket {
     uint16_t throttle;    // 0-1000
     int16_t  yaw;         // -500 to +500
     int16_t  pitch;       // -500 to +500
     int16_t  roll;        // -500 to +500
-    uint8_t  switches;    // Bit 0: Arm, Bit 1: Calibrate, Bit 2: Motor Test, Bit 3: Aux
-    uint8_t  checksum;    // XOR of bytes 0-8
-    uint32_t sequence;    // Packet sequence number
-    uint8_t  rssiRequest; // Request RSSI feedback
-    uint8_t  reserved;    // Future use
+    uint8_t  switches;    // Bitfield
+    uint8_t  checksum;    // XOR checksum
+    uint32_t sequence;    // Packet counter
+    uint8_t  channel;     // RF channel (for verification)
+    uint8_t  reserved;
     
     void calculateChecksum() {
         const uint8_t* data = reinterpret_cast<const uint8_t*>(this);
         uint8_t calc = 0;
-        for (uint8_t i = 0; i < 9; i++) {  // Bytes 0-8
+        for (uint8_t i = 0; i < 9; i++) {
             calc ^= data[i];
         }
         checksum = calc;
@@ -94,607 +128,609 @@ struct __attribute__((packed)) ControlPacket {
 };
 
 // ============================================================================
-// TIMING CONFIGURATION
-// ============================================================================
-
-namespace Timing {
-    constexpr uint32_t TX_PERIOD_MS = 20;      // 50 Hz transmission
-    constexpr uint32_t INPUT_PERIOD_MS = 10;   // 100 Hz input sampling
-    constexpr uint32_t LED_PERIOD_MS = 500;    // 2 Hz status blink
-    constexpr uint32_t DEBOUNCE_MS = 50;       // Button debounce time
-}
-
-// ============================================================================
 // JOYSTICK CONFIGURATION
 // ============================================================================
 
 namespace JoystickConfig {
-    // ADC range (10-bit)
-    constexpr int16_t ADC_MIN = 0;
-    constexpr int16_t ADC_MAX = 1023;
-    constexpr int16_t ADC_CENTER = 512;
-    
-    // Deadband (in ADC units, ~5%)
+    // Deadband (ADC units, ~5% of range)
     constexpr int16_t DEADBAND = 25;
     
-    // Output range
-    constexpr int16_t OUTPUT_MIN = -500;
-    constexpr int16_t OUTPUT_MAX = 500;
-    constexpr int16_t THROTTLE_MIN = 0;
-    constexpr int16_t THROTTLE_MAX = 1000;
-    
-    // Expo factor (0.0 = linear, 1.0 = maximum expo)
-    // Expo gives more precision around center
+    // Expo factor (0.0 = linear, 0.5 = medium expo)
     constexpr float EXPO = 0.3f;
-    
-    // Calibration storage
-    struct Calibration {
-        int16_t throttleMin, throttleMax;
-        int16_t yawCenter;
-        int16_t pitchCenter;
-        int16_t rollCenter;
-        bool valid;
-    };
+}
+
+// Joystick calibration data
+struct JoystickCalibration {
+    int16_t throttleMin = 0;
+    int16_t throttleMax = 1023;
+    int16_t yawCenter = 512;
+    int16_t pitchCenter = 512;
+    int16_t rollCenter = 512;
+};
+
+JoystickCalibration joyCal;
+
+// ============================================================================
+// GLOBAL OBJECTS
+// ============================================================================
+
+RF24 radio(Pins::RF_CE, Pins::RF_CSN);
+
+// ============================================================================
+// GLOBAL VARIABLES
+// ============================================================================
+
+// Control packet
+ControlPacket txPacket;
+uint32_t packetSequence = 0;
+
+// Raw joystick values
+int16_t rawThrottle = 0;
+int16_t rawYaw = 0;
+int16_t rawPitch = 0;
+int16_t rawRoll = 0;
+
+// Processed joystick values
+int16_t throttle = 0;
+int16_t yaw = 0;
+int16_t pitch = 0;
+int16_t roll = 0;
+
+// Switch states
+bool armSwitch = false;
+bool altHoldSwitch = false;
+bool calibButton = false;
+bool motorTestButton = false;
+
+// Previous switch states for edge detection
+bool prevArmSwitch = false;
+bool prevCalibButton = false;
+bool prevMotorTestButton = false;
+
+// Communication status
+bool rfInitialized = false;
+bool rfConnected = false;
+uint32_t packetsSent = 0;
+uint32_t packetsAcked = 0;
+uint32_t packetsFailed = 0;
+uint32_t lastAckTime = 0;
+
+// Timing
+uint32_t lastTxTime = 0;
+uint32_t lastInputTime = 0;
+uint32_t lastDebugTime = 0;
+uint32_t lastLedTime = 0;
+bool ledState = false;
+
+// ============================================================================
+// BUZZER FUNCTIONS
+// ============================================================================
+
+void beep(uint16_t duration, uint16_t freq = 2000) {
+    tone(Pins::BUZZER, freq, duration);
+}
+
+void beepBlocking(uint16_t duration, uint16_t freq = 2000) {
+    tone(Pins::BUZZER, freq);
+    delay(duration);
+    noTone(Pins::BUZZER);
+}
+
+void buzzerStartup() {
+    beepBlocking(100, 1500);
+    delay(50);
+    beepBlocking(100, 2000);
+    delay(50);
+    beepBlocking(100, 2500);
+    delay(50);
+    beepBlocking(200, 3000);
+}
+
+void buzzerButtonPress() {
+    beep(30, 2500);
+}
+
+void buzzerArmOn() {
+    beepBlocking(100, 2000);
+    delay(50);
+    beepBlocking(200, 2500);
+}
+
+void buzzerArmOff() {
+    beepBlocking(200, 1500);
+}
+
+void buzzerConnected() {
+    // 3 quick beeps for connection
+    for (int i = 0; i < 3; i++) {
+        beepBlocking(50, 2500);
+        delay(50);
+    }
+}
+
+void buzzerDisconnected() {
+    beepBlocking(300, 800);
+}
+
+void buzzerError() {
+    for (int i = 0; i < 3; i++) {
+        beepBlocking(150, 800);
+        delay(100);
+    }
+}
+
+void buzzerTxSuccess() {
+    // Very short beep for successful TX (optional, can be noisy)
+    // beep(10, 3000);
 }
 
 // ============================================================================
-// JOYSTICK INPUT HANDLER
+// SERIAL DEBUG OUTPUT
 // ============================================================================
 
-class JoystickInput {
-private:
-    JoystickConfig::Calibration cal_;
+void printDebugHeader() {
+    Serial.println(F("\n========================================"));
+    Serial.println(F("  QUADCOPTER REMOTE CONTROLLER v2.0"));
+    Serial.println(F("========================================"));
+    Serial.print(F("RF Channel: "));
+    Serial.println(RF_CHANNEL);
+    Serial.println(F(""));
+}
+
+void printStatus() {
+    if (!DEBUG_SERIAL) return;
     
-    // Raw ADC values
-    int16_t rawThrottle_;
-    int16_t rawYaw_;
-    int16_t rawPitch_;
-    int16_t rawRoll_;
+    Serial.println(F("\n--- RC STATUS ---"));
     
-    // Processed values
-    int16_t throttle_;
-    int16_t yaw_;
-    int16_t pitch_;
-    int16_t roll_;
+    // RF Status
+    Serial.print(F("RF: "));
+    if (rfConnected) {
+        Serial.print(F("CONNECTED"));
+    } else {
+        Serial.print(F("DISCONNECTED"));
+    }
+    Serial.print(F(" | Sent: "));
+    Serial.print(packetsSent);
+    Serial.print(F(" | ACK: "));
+    Serial.print(packetsAcked);
+    Serial.print(F(" | Fail: "));
+    Serial.print(packetsFailed);
     
-    // Apply exponential curve for precision near center
-    int16_t applyExpo(int16_t value, float expo) {
-        float normalized = value / 500.0f;  // -1 to 1
-        float curved = normalized * (1.0f - expo) + 
-                      (normalized * normalized * normalized) * expo;
-        return (int16_t)(curved * 500.0f);
+    // Calculate success rate
+    if (packetsSent > 0) {
+        float successRate = (float)packetsAcked / packetsSent * 100.0f;
+        Serial.print(F(" | Rate: "));
+        Serial.print(successRate, 1);
+        Serial.print(F("%"));
+    }
+    Serial.println();
+    
+    // Raw Joystick Values
+    Serial.print(F("RAW: T="));
+    Serial.print(rawThrottle);
+    Serial.print(F(" Y="));
+    Serial.print(rawYaw);
+    Serial.print(F(" P="));
+    Serial.print(rawPitch);
+    Serial.print(F(" R="));
+    Serial.println(rawRoll);
+    
+    // Processed Values
+    Serial.print(F("OUT: T="));
+    Serial.print(throttle);
+    Serial.print(F(" Y="));
+    Serial.print(yaw);
+    Serial.print(F(" P="));
+    Serial.print(pitch);
+    Serial.print(F(" R="));
+    Serial.println(roll);
+    
+    // Switches
+    Serial.print(F("SW: ARM="));
+    Serial.print(armSwitch ? "ON" : "OFF");
+    Serial.print(F(" ALT="));
+    Serial.print(altHoldSwitch ? "ON" : "OFF");
+    Serial.print(F(" CAL="));
+    Serial.print(calibButton ? "ON" : "OFF");
+    Serial.print(F(" MTR="));
+    Serial.println(motorTestButton ? "ON" : "OFF");
+    
+    Serial.println(F("---"));
+}
+
+// ============================================================================
+// JOYSTICK PROCESSING
+// ============================================================================
+
+int16_t applyDeadbandAndScale(int16_t raw, int16_t center, int16_t deadband, int16_t outMin, int16_t outMax) {
+    int16_t deviation = raw - center;
+    
+    // Apply deadband
+    if (abs(deviation) < deadband) {
+        return 0;  // Center output
     }
     
-    // Apply deadband and mapping
-    int16_t processAxis(int16_t raw, int16_t center, int16_t outMin, int16_t outMax) {
-        int16_t deviation = raw - center;
-        
-        // Apply deadband
-        if (abs(deviation) < JoystickConfig::DEADBAND) {
-            return (outMin + outMax) / 2;  // Center output
-        }
-        
-        // Remove deadband from calculation
-        if (deviation > 0) {
-            deviation -= JoystickConfig::DEADBAND;
+    // Remove deadband from range
+    if (deviation > 0) {
+        deviation -= deadband;
+    } else {
+        deviation += deadband;
+    }
+    
+    // Calculate max deviation after deadband
+    int16_t maxDev = 512 - deadband;
+    
+    // Scale to output range
+    int16_t halfRange = (outMax - outMin) / 2;
+    return (int32_t)deviation * halfRange / maxDev;
+}
+
+int16_t applyExpo(int16_t value, float expo) {
+    // Expo curve: output = input * (1-expo) + input^3 * expo
+    float normalized = value / 500.0f;  // -1 to 1
+    float curved = normalized * (1.0f - expo) + 
+                  (normalized * normalized * normalized) * expo;
+    return (int16_t)(curved * 500.0f);
+}
+
+void readJoysticks() {
+    // Read raw ADC values (average 4 samples for noise reduction)
+    int32_t sum[4] = {0, 0, 0, 0};
+    for (uint8_t i = 0; i < 4; i++) {
+        sum[0] += analogRead(Pins::JOY_THROTTLE);
+        sum[1] += analogRead(Pins::JOY_YAW);
+        sum[2] += analogRead(Pins::JOY_PITCH);
+        sum[3] += analogRead(Pins::JOY_ROLL);
+    }
+    rawThrottle = sum[0] / 4;
+    rawYaw = sum[1] / 4;
+    rawPitch = sum[2] / 4;
+    rawRoll = sum[3] / 4;
+    
+    // Process throttle (unidirectional: 0 to 1000)
+    throttle = map(rawThrottle, joyCal.throttleMin, joyCal.throttleMax, 0, 1000);
+    throttle = constrain(throttle, 0, 1000);
+    
+    // Process centered axes (bidirectional: -500 to +500)
+    yaw = applyDeadbandAndScale(rawYaw, joyCal.yawCenter, 
+                                 JoystickConfig::DEADBAND, -500, 500);
+    pitch = applyDeadbandAndScale(rawPitch, joyCal.pitchCenter,
+                                   JoystickConfig::DEADBAND, -500, 500);
+    roll = applyDeadbandAndScale(rawRoll, joyCal.rollCenter,
+                                  JoystickConfig::DEADBAND, -500, 500);
+    
+    // Apply expo
+    yaw = applyExpo(yaw, JoystickConfig::EXPO);
+    pitch = applyExpo(pitch, JoystickConfig::EXPO);
+    roll = applyExpo(roll, JoystickConfig::EXPO);
+}
+
+void readSwitches() {
+    // Read switches (active LOW with internal pull-up)
+    prevArmSwitch = armSwitch;
+    prevCalibButton = calibButton;
+    prevMotorTestButton = motorTestButton;
+    
+    armSwitch = !digitalRead(Pins::SW_ARM);
+    altHoldSwitch = !digitalRead(Pins::SW_ALTHOLD);
+    calibButton = !digitalRead(Pins::BTN_CALIB);
+    motorTestButton = !digitalRead(Pins::BTN_MOTOR);
+    
+    // Edge detection for buttons
+    if (calibButton && !prevCalibButton) {
+        buzzerButtonPress();
+        Serial.println(F("Calibrate button pressed"));
+    }
+    if (motorTestButton && !prevMotorTestButton) {
+        buzzerButtonPress();
+        Serial.println(F("Motor test button pressed"));
+    }
+    
+    // Arm switch change
+    if (armSwitch != prevArmSwitch) {
+        if (armSwitch) {
+            buzzerArmOn();
+            Serial.println(F("ARM switch: ON"));
         } else {
-            deviation += JoystickConfig::DEADBAND;
+            buzzerArmOff();
+            Serial.println(F("ARM switch: OFF"));
         }
-        
-        // Calculate effective range
-        int16_t maxDeviation = (JoystickConfig::ADC_MAX - center) - JoystickConfig::DEADBAND;
-        
-        // Map to output range
-        int16_t halfRange = (outMax - outMin) / 2;
-        int16_t output = ((int32_t)deviation * halfRange) / maxDeviation;
-        
-        return constrain(output + (outMin + outMax) / 2, outMin, outMax);
+    }
+}
+
+void calibrateJoystickCenters() {
+    Serial.println(F("Calibrating joystick centers..."));
+    Serial.println(F("Keep all sticks centered!"));
+    
+    beepBlocking(200, 1500);
+    delay(500);
+    
+    // Average 50 samples
+    int32_t sum[3] = {0, 0, 0};
+    for (int i = 0; i < 50; i++) {
+        sum[0] += analogRead(Pins::JOY_YAW);
+        sum[1] += analogRead(Pins::JOY_PITCH);
+        sum[2] += analogRead(Pins::JOY_ROLL);
+        delay(20);
     }
     
-public:
-    JoystickInput() : throttle_(0), yaw_(0), pitch_(0), roll_(0) {
-        cal_.valid = false;
-        // Default calibration (assuming centered pots at startup)
-        cal_.throttleMin = 0;
-        cal_.throttleMax = 1023;
-        cal_.yawCenter = 512;
-        cal_.pitchCenter = 512;
-        cal_.rollCenter = 512;
-    }
+    joyCal.yawCenter = sum[0] / 50;
+    joyCal.pitchCenter = sum[1] / 50;
+    joyCal.rollCenter = sum[2] / 50;
     
-    void begin() {
-        // Configure analog inputs (default in Arduino)
-        // analogReference(DEFAULT);  // 5V reference
-    }
+    Serial.print(F("Calibration done: Yaw="));
+    Serial.print(joyCal.yawCenter);
+    Serial.print(F(" Pitch="));
+    Serial.print(joyCal.pitchCenter);
+    Serial.print(F(" Roll="));
+    Serial.println(joyCal.rollCenter);
     
-    void update() {
-        // Read raw ADC values (average 4 samples for noise reduction)
-        int32_t sum[4] = {0, 0, 0, 0};
-        for (uint8_t i = 0; i < 4; i++) {
-            sum[0] += analogRead(Pins::JOY_THROTTLE);
-            sum[1] += analogRead(Pins::JOY_YAW);
-            sum[2] += analogRead(Pins::JOY_PITCH);
-            sum[3] += analogRead(Pins::JOY_ROLL);
-        }
-        rawThrottle_ = sum[0] / 4;
-        rawYaw_      = sum[1] / 4;
-        rawPitch_    = sum[2] / 4;
-        rawRoll_     = sum[3] / 4;
-        
-        // Process throttle (unidirectional: 0 to 1000)
-        throttle_ = map(rawThrottle_, cal_.throttleMin, cal_.throttleMax,
-                       JoystickConfig::THROTTLE_MIN, JoystickConfig::THROTTLE_MAX);
-        throttle_ = constrain(throttle_, JoystickConfig::THROTTLE_MIN, 
-                             JoystickConfig::THROTTLE_MAX);
-        
-        // Process centered axes (bidirectional: -500 to +500)
-        yaw_   = processAxis(rawYaw_, cal_.yawCenter,
-                            JoystickConfig::OUTPUT_MIN, JoystickConfig::OUTPUT_MAX);
-        pitch_ = processAxis(rawPitch_, cal_.pitchCenter,
-                            JoystickConfig::OUTPUT_MIN, JoystickConfig::OUTPUT_MAX);
-        roll_  = processAxis(rawRoll_, cal_.rollCenter,
-                            JoystickConfig::OUTPUT_MIN, JoystickConfig::OUTPUT_MAX);
-        
-        // Apply expo curve
-        yaw_   = applyExpo(yaw_, JoystickConfig::EXPO);
-        pitch_ = applyExpo(pitch_, JoystickConfig::EXPO);
-        roll_  = applyExpo(roll_, JoystickConfig::EXPO);
-    }
-    
-    /**
-     * Calibrate joystick centers
-     * Call with sticks centered
-     */
-    void calibrateCenters() {
-        // Take average of multiple samples
-        int32_t sum[3] = {0, 0, 0};
-        for (uint8_t i = 0; i < 32; i++) {
-            sum[0] += analogRead(Pins::JOY_YAW);
-            sum[1] += analogRead(Pins::JOY_PITCH);
-            sum[2] += analogRead(Pins::JOY_ROLL);
-            delay(10);
-        }
-        cal_.yawCenter   = sum[0] / 32;
-        cal_.pitchCenter = sum[1] / 32;
-        cal_.rollCenter  = sum[2] / 32;
-        cal_.valid = true;
-    }
-    
-    /**
-     * Calibrate throttle range
-     * Call with throttle at minimum, then at maximum
-     */
-    void calibrateThrottleMin() {
-        int32_t sum = 0;
-        for (uint8_t i = 0; i < 32; i++) {
-            sum += analogRead(Pins::JOY_THROTTLE);
-            delay(10);
-        }
-        cal_.throttleMin = sum / 32;
-    }
-    
-    void calibrateThrottleMax() {
-        int32_t sum = 0;
-        for (uint8_t i = 0; i < 32; i++) {
-            sum += analogRead(Pins::JOY_THROTTLE);
-            delay(10);
-        }
-        cal_.throttleMax = sum / 32;
-    }
-    
-    // Getters
-    int16_t getThrottle() const { return throttle_; }
-    int16_t getYaw()      const { return yaw_; }
-    int16_t getPitch()    const { return pitch_; }
-    int16_t getRoll()     const { return roll_; }
-    
-    // Raw value getters (for debugging)
-    int16_t getRawThrottle() const { return rawThrottle_; }
-    int16_t getRawYaw()      const { return rawYaw_; }
-    int16_t getRawPitch()    const { return rawPitch_; }
-    int16_t getRawRoll()     const { return rawRoll_; }
-    
-    const JoystickConfig::Calibration& getCalibration() const { return cal_; }
-};
+    beepBlocking(100, 2000);
+    delay(50);
+    beepBlocking(100, 2500);
+    delay(50);
+    beepBlocking(200, 3000);
+}
 
 // ============================================================================
-// SWITCH/BUTTON INPUT HANDLER
+// RF COMMUNICATION
 // ============================================================================
 
-class SwitchInput {
-private:
-    // Debounce state
-    struct DebouncedInput {
-        bool state;
-        bool lastReading;
-        uint32_t lastChangeTime;
-    };
+bool setupRadio() {
+    Serial.println(F("Initializing NRF24L01..."));
+    Serial.print(F("Channel: "));
+    Serial.println(RFConfig::CHANNEL);
     
-    DebouncedInput armSwitch_;
-    DebouncedInput auxSwitch_;
-    DebouncedInput calibButton_;
-    DebouncedInput motorButton_;
-    
-    // Edge detection
-    bool prevArm_;
-    bool prevCalib_;
-    bool prevMotor_;
-    
-    bool updateDebounced(DebouncedInput& input, uint8_t pin, bool activeLow = true) {
-        bool reading = digitalRead(pin);
-        if (activeLow) reading = !reading;
-        
-        if (reading != input.lastReading) {
-            input.lastChangeTime = millis();
-            input.lastReading = reading;
-        }
-        
-        if ((millis() - input.lastChangeTime) >= Timing::DEBOUNCE_MS) {
-            if (reading != input.state) {
-                input.state = reading;
-                return true;  // State changed
-            }
-        }
+    if (!radio.begin()) {
+        Serial.println(F("ERROR: NRF24L01 not found!"));
         return false;
     }
     
-public:
-    SwitchInput() {
-        armSwitch_ = {false, false, 0};
-        auxSwitch_ = {false, false, 0};
-        calibButton_ = {false, false, 0};
-        motorButton_ = {false, false, 0};
-        prevArm_ = false;
-        prevCalib_ = false;
-        prevMotor_ = false;
-    }
+    // Configure radio for ACK mode (must match receiver)
+    radio.setChannel(RFConfig::CHANNEL);
+    radio.setDataRate(RF24_2MBPS);
+    radio.setPALevel(RF24_PA_MAX);
+    radio.setPayloadSize(RFConfig::PAYLOAD_SIZE);
     
-    void begin() {
-        // Configure inputs with pull-ups (switches connect to GND when active)
-        pinMode(Pins::SW_ARM, INPUT_PULLUP);
-        pinMode(Pins::SW_AUX, INPUT_PULLUP);
-        pinMode(Pins::BTN_CALIB, INPUT_PULLUP);
-        pinMode(Pins::BTN_MOTOR, INPUT_PULLUP);
-    }
+    // Enable ACK mode
+    radio.setAutoAck(true);
+    radio.setRetries(RFConfig::RETRY_DELAY, RFConfig::RETRY_COUNT);
     
-    void update() {
-        prevArm_ = armSwitch_.state;
-        prevCalib_ = calibButton_.state;
-        prevMotor_ = motorButton_.state;
+    // CRC for data integrity
+    radio.setCRCLength(RF24_CRC_16);
+    
+    // Open writing pipe
+    radio.openWritingPipe(RFConfig::PIPE_ADDRESS);
+    
+    // Stop listening (we're transmitting)
+    radio.stopListening();
+    
+    Serial.println(F("NRF24L01 configured in ACK mode (Transmitter)."));
+    
+    rfInitialized = true;
+    return true;
+}
+
+bool sendPacket() {
+    if (!rfInitialized) return false;
+    
+    // Build packet
+    txPacket.throttle = throttle;
+    txPacket.yaw = yaw;
+    txPacket.pitch = pitch;
+    txPacket.roll = roll;
+    
+    // Build switch byte
+    txPacket.switches = 0;
+    if (armSwitch)        txPacket.switches |= (1 << RFConfig::SW_ARM_BIT);
+    if (calibButton)      txPacket.switches |= (1 << RFConfig::SW_CALIBRATE_BIT);
+    if (motorTestButton)  txPacket.switches |= (1 << RFConfig::SW_MOTORTEST_BIT);
+    if (altHoldSwitch)    txPacket.switches |= (1 << RFConfig::SW_ALTHOLD_BIT);
+    
+    txPacket.sequence = packetSequence++;
+    txPacket.channel = RFConfig::CHANNEL;
+    txPacket.reserved = 0;
+    
+    // Calculate checksum
+    txPacket.calculateChecksum();
+    
+    // Send packet
+    packetsSent++;
+    bool success = radio.write(&txPacket, sizeof(txPacket));
+    
+    if (success) {
+        packetsAcked++;
+        lastAckTime = millis();
         
-        updateDebounced(armSwitch_, Pins::SW_ARM);
-        updateDebounced(auxSwitch_, Pins::SW_AUX);
-        updateDebounced(calibButton_, Pins::BTN_CALIB);
-        updateDebounced(motorButton_, Pins::BTN_MOTOR);
-    }
-    
-    // Current states
-    bool isArmed()       const { return armSwitch_.state; }
-    bool isAuxOn()       const { return auxSwitch_.state; }
-    bool isCalibPressed() const { return calibButton_.state; }
-    bool isMotorPressed() const { return motorButton_.state; }
-    
-    // Edge detection (rising edge = button just pressed)
-    bool armJustChanged()   const { return armSwitch_.state != prevArm_; }
-    bool calibJustPressed() const { return calibButton_.state && !prevCalib_; }
-    bool motorJustPressed() const { return motorButton_.state && !prevMotor_; }
-    
-    // Build switch byte for packet
-    uint8_t getSwitchByte() const {
-        uint8_t sw = 0;
-        if (armSwitch_.state)    sw |= (1 << RFConfig::SW_ARM_BIT);
-        if (calibButton_.state)  sw |= (1 << RFConfig::SW_CALIBRATE_BIT);
-        if (motorButton_.state)  sw |= (1 << RFConfig::SW_MOTORTEST_BIT);
-        if (auxSwitch_.state)    sw |= (1 << RFConfig::SW_AUX_BIT);
-        return sw;
-    }
-};
-
-// ============================================================================
-// RADIO TRANSMITTER
-// ============================================================================
-
-class RadioTransmitter {
-private:
-    RF24 radio_;
-    uint32_t packetSequence_;
-    uint32_t packetsSent_;
-    uint32_t lastTxTime_;
-    bool initialized_;
-    
-public:
-    RadioTransmitter() : radio_(Pins::RF_CE, Pins::RF_CSN),
-                         packetSequence_(0), packetsSent_(0),
-                         lastTxTime_(0), initialized_(false) {}
-    
-    bool begin() {
-        if (!radio_.begin()) {
-            return false;
+        if (!rfConnected) {
+            rfConnected = true;
+            Serial.println(F("\n*** CONNECTED TO DRONE! ***"));
+            buzzerConnected();
         }
         
-        // Configure radio (must match receiver)
-        radio_.setChannel(RFConfig::CHANNEL);
-        radio_.setDataRate(RF24_2MBPS);
-        radio_.setPALevel(RF24_PA_MAX);
-        radio_.setPayloadSize(RFConfig::PAYLOAD_SIZE);
-        radio_.setAutoAck(false);          // NO_ACK mode
-        radio_.setRetries(0, 0);           // No retries
-        radio_.setCRCLength(RF24_CRC_16);
-        
-        // Open writing pipe
-        radio_.openWritingPipe(RFConfig::ADDRESS);
-        radio_.stopListening();
-        
-        initialized_ = true;
         return true;
-    }
-    
-    bool send(ControlPacket& packet) {
-        if (!initialized_) return false;
+    } else {
+        packetsFailed++;
         
-        // Set sequence number
-        packet.sequence = packetSequence_++;
-        
-        // Calculate checksum
-        packet.calculateChecksum();
-        
-        // Transmit (non-blocking in NO_ACK mode)
-        bool success = radio_.write(&packet, sizeof(packet));
-        
-        if (success) {
-            packetsSent_++;
-            lastTxTime_ = millis();
+        if (rfConnected && (millis() - lastAckTime > 500)) {
+            rfConnected = false;
+            Serial.println(F("\n*** CONNECTION LOST! ***"));
+            buzzerDisconnected();
         }
         
-        return success;
+        return false;
     }
-    
-    uint32_t getPacketsSent() const { return packetsSent_; }
-    uint32_t getLastTxTime()  const { return lastTxTime_; }
-    bool isInitialized()      const { return initialized_; }
-};
+}
 
 // ============================================================================
-// USER INTERFACE
+// LED UPDATE
 // ============================================================================
 
-class UserInterface {
-private:
-    bool buzzerEnabled_;
+void updateLED() {
+    uint32_t now = millis();
     
-public:
-    UserInterface() : buzzerEnabled_(true) {}
-    
-    void begin() {
-        pinMode(Pins::BUZZER, OUTPUT);
-        digitalWrite(Pins::BUZZER, LOW);
-    }
-    
-    void beep(uint16_t durationMs, uint16_t frequency = 2000) {
-        if (buzzerEnabled_) {
-            tone(Pins::BUZZER, frequency, durationMs);
-        }
-    }
-    
-    void beepPattern(uint8_t count, uint16_t onMs = 100, uint16_t offMs = 100) {
-        for (uint8_t i = 0; i < count; i++) {
-            beep(onMs);
-            delay(onMs + offMs);
-        }
-    }
-    
-    // Sound patterns
-    void soundStartup() {
-        beep(100, 2000);
-        delay(100);
-        beep(100, 2500);
-        delay(100);
-        beep(200, 3000);
-    }
-    
-    void soundButtonPress() {
-        beep(30, 2500);
-    }
-    
-    void soundArmChange(bool armed) {
-        if (armed) {
-            beep(100, 2000);
-            delay(50);
-            beep(200, 2500);
+    if (rfConnected) {
+        if (armSwitch) {
+            // Solid when armed and connected
+            digitalWrite(Pins::LED, HIGH);
         } else {
-            beep(200, 1500);
-        }
-    }
-    
-    void soundError() {
-        beepPattern(3, 200, 100);
-    }
-    
-    void soundTxOk() {
-        beep(20, 3000);
-    }
-    
-    void setBuzzerEnabled(bool enabled) {
-        buzzerEnabled_ = enabled;
-    }
-};
-
-// ============================================================================
-// REMOTE CONTROLLER (MAIN CLASS)
-// ============================================================================
-
-class RemoteController {
-private:
-    JoystickInput joystick_;
-    SwitchInput switches_;
-    RadioTransmitter radio_;
-    UserInterface ui_;
-    
-    // Timing
-    uint32_t lastInputTime_;
-    uint32_t lastTxTime_;
-    
-    // State
-    bool rfOk_;
-    bool prevArmed_;
-    
-    // Current packet
-    ControlPacket packet_;
-    
-public:
-    RemoteController() : rfOk_(false), prevArmed_(false) {
-        lastInputTime_ = 0;
-        lastTxTime_ = 0;
-        memset(&packet_, 0, sizeof(packet_));
-    }
-    
-    void begin() {
-        // Initialize UI first
-        ui_.begin();
-        
-        // Initialize inputs
-        joystick_.begin();
-        switches_.begin();
-        
-        // Initialize radio
-        rfOk_ = radio_.begin();
-        
-        if (rfOk_) {
-            ui_.soundStartup();
-        } else {
-            ui_.soundError();
-        }
-        
-        // Initial calibration of joystick centers
-        // Assumes sticks are centered at startup
-        joystick_.calibrateCenters();
-        
-        // Initialize timing
-        lastInputTime_ = millis();
-        lastTxTime_ = millis();
-    }
-    
-    void update() {
-        uint32_t now = millis();
-        
-        // Update inputs (100 Hz)
-        if (now - lastInputTime_ >= Timing::INPUT_PERIOD_MS) {
-            lastInputTime_ = now;
-            
-            joystick_.update();
-            switches_.update();
-            
-            // Handle button presses
-            if (switches_.calibJustPressed()) {
-                ui_.soundButtonPress();
-            }
-            if (switches_.motorJustPressed()) {
-                ui_.soundButtonPress();
-            }
-            
-            // Handle arm switch changes
-            bool armed = switches_.isArmed();
-            if (armed != prevArmed_) {
-                ui_.soundArmChange(armed);
-                prevArmed_ = armed;
+            // Slow blink when connected but disarmed
+            if (now - lastLedTime >= 500) {
+                lastLedTime = now;
+                ledState = !ledState;
+                digitalWrite(Pins::LED, ledState);
             }
         }
-        
-        // Transmit packet (50 Hz)
-        if (now - lastTxTime_ >= Timing::TX_PERIOD_MS) {
-            lastTxTime_ = now;
-            
-            // Build packet
-            packet_.throttle = joystick_.getThrottle();
-            packet_.yaw      = joystick_.getYaw();
-            packet_.pitch    = joystick_.getPitch();
-            packet_.roll     = joystick_.getRoll();
-            packet_.switches = switches_.getSwitchByte();
-            packet_.rssiRequest = 0;
-            packet_.reserved = 0;
-            
-            // Send packet
-            if (rfOk_) {
-                radio_.send(packet_);
-            }
+    } else {
+        // Fast blink when not connected
+        if (now - lastLedTime >= 100) {
+            lastLedTime = now;
+            ledState = !ledState;
+            digitalWrite(Pins::LED, ledState);
         }
     }
-    
-    // Debug accessors
-    const JoystickInput& getJoystick() const { return joystick_; }
-    const SwitchInput& getSwitches() const { return switches_; }
-    const RadioTransmitter& getRadio() const { return radio_; }
-    bool isRfOk() const { return rfOk_; }
-};
+}
 
 // ============================================================================
-// GLOBAL INSTANCE
-// ============================================================================
-
-RemoteController remote;
-
-// ============================================================================
-// ARDUINO ENTRY POINTS
+// MAIN SETUP
 // ============================================================================
 
 void setup() {
-    // Optional: Serial for debugging
-    // Serial.begin(115200);
-    // Serial.println(F("Quad Remote v1.0"));
+    // Initialize serial
+    Serial.begin(SERIAL_BAUD);
+    while (!Serial && millis() < 3000);
     
-    remote.begin();
+    printDebugHeader();
+    
+    // Initialize pins
+    pinMode(Pins::LED, OUTPUT);
+    pinMode(Pins::BUZZER, OUTPUT);
+    pinMode(Pins::SW_ARM, INPUT_PULLUP);
+    pinMode(Pins::SW_ALTHOLD, INPUT_PULLUP);
+    pinMode(Pins::BTN_CALIB, INPUT_PULLUP);
+    pinMode(Pins::BTN_MOTOR, INPUT_PULLUP);
+    
+    digitalWrite(Pins::LED, HIGH);
+    
+    // Startup sound
+    buzzerStartup();
+    
+    // Initialize radio
+    if (!setupRadio()) {
+        Serial.println(F("RADIO INIT FAILED!"));
+        buzzerError();
+        while (1) {
+            // Blink LED rapidly to indicate error
+            digitalWrite(Pins::LED, !digitalRead(Pins::LED));
+            delay(100);
+        }
+    }
+    
+    // Calibrate joystick centers (assumes sticks are centered at startup)
+    calibrateJoystickCenters();
+    
+    Serial.println(F("\n*** REMOTE READY ***"));
+    Serial.println(F("Transmitting on channel "));
+    Serial.println(RF_CHANNEL);
+    Serial.println(F("Searching for drone..."));
+    
+    // Initialize timing
+    lastTxTime = millis();
+    lastInputTime = millis();
+    lastDebugTime = millis();
+    lastLedTime = millis();
 }
 
+// ============================================================================
+// MAIN LOOP
+// ============================================================================
+
 void loop() {
-    remote.update();
+    uint32_t now = millis();
     
-    // Optional: Debug output
-    // static uint32_t lastDebug = 0;
-    // if (millis() - lastDebug > 200) {
-    //     lastDebug = millis();
-    //     Serial.print(F("T:"));
-    //     Serial.print(remote.getJoystick().getThrottle());
-    //     Serial.print(F(" Y:"));
-    //     Serial.print(remote.getJoystick().getYaw());
-    //     Serial.print(F(" P:"));
-    //     Serial.print(remote.getJoystick().getPitch());
-    //     Serial.print(F(" R:"));
-    //     Serial.print(remote.getJoystick().getRoll());
-    //     Serial.print(F(" SW:0x"));
-    //     Serial.println(remote.getSwitches().getSwitchByte(), HEX);
-    // }
+    // Read inputs (100 Hz)
+    if (now - lastInputTime >= Timing::INPUT_PERIOD_MS) {
+        lastInputTime = now;
+        readJoysticks();
+        readSwitches();
+    }
+    
+    // Transmit packet (50 Hz)
+    if (now - lastTxTime >= Timing::TX_PERIOD_MS) {
+        lastTxTime = now;
+        sendPacket();
+    }
+    
+    // Update LED
+    updateLED();
+    
+    // Debug output (4 Hz)
+    if (DEBUG_SERIAL && (now - lastDebugTime >= Timing::DEBUG_PERIOD_MS)) {
+        lastDebugTime = now;
+        printStatus();
+    }
 }
 
 /**
  * ============================================================================
- * USAGE NOTES
+ * WIRING INSTRUCTIONS
  * ============================================================================
  * 
- * 1. JOYSTICK WIRING
- *    - Connect VCC to 5V
- *    - Connect GND to GND
- *    - Connect each axis output to the respective analog pin
- *    - Ensure throttle returns to minimum when released (spring return)
- *      OR implement software low-throttle lock
+ * NRF24L01 Module:
+ *   VCC  → 3.3V (IMPORTANT: NOT 5V!)
+ *   GND  → GND
+ *   CE   → D9
+ *   CSN  → D10
+ *   SCK  → D13
+ *   MOSI → D11
+ *   MISO → D12
+ *   IRQ  → Not connected
  * 
- * 2. SWITCH WIRING
- *    - Toggle switches: Connect between pin and GND
- *    - Push buttons: Connect between pin and GND
- *    - Internal pull-ups are used (active LOW)
+ *   TIP: Add 10-100µF capacitor between VCC and GND of NRF24L01
+ *        for stable operation!
  * 
- * 3. ARM SWITCH SAFETY
- *    - Use a toggle switch with a guard cover for arm/disarm
- *    - Consider adding a physical key switch for additional safety
+ * Joysticks (2-axis potentiometer type):
+ *   VCC → 5V
+ *   GND → GND
+ *   Throttle (vertical axis) → A0
+ *   Yaw (horizontal axis)    → A1
+ *   Pitch (vertical axis)    → A2
+ *   Roll (horizontal axis)   → A3
  * 
- * 4. CALIBRATION
- *    - On startup, ensure all sticks are centered
- *    - Throttle range is assumed 0-1023 by default
- *    - For full throttle calibration, modify code to include
- *      a calibration mode triggered by button combination
+ * Toggle Switches (connect between pin and GND):
+ *   ARM Switch     → D2
+ *   Alt Hold Switch→ D3
  * 
- * 5. BATTERY MONITORING (Optional)
- *    - Add voltage divider to A6 (2:1 for 2S LiPo)
- *    - Monitor and warn when battery is low
+ * Push Buttons (connect between pin and GND):
+ *   Calibrate      → D4
+ *   Motor Test     → D5
+ * 
+ * Buzzer:
+ *   + → D6 (through 100Ω resistor if needed)
+ *   - → GND
+ * 
+ * LED:
+ *   + → D7 (through 220Ω resistor)
+ *   - → GND
+ * 
+ * ============================================================================
+ * USAGE
+ * ============================================================================
+ * 
+ * 1. Power on the REMOTE first
+ * 2. Wait for startup beeps
+ * 3. Ensure ARM switch is OFF
+ * 4. Power on the DRONE
+ * 5. Wait for connection (buzzer will beep 3 times on RC, 5 times on drone)
+ * 6. Check serial monitor on both devices for status
+ * 7. Move throttle to minimum
+ * 8. Flip ARM switch to ON
+ * 9. Drone should beep and LED goes solid
+ * 10. Slowly increase throttle to fly
+ * 
+ * TO DISARM:
+ * - Flip ARM switch to OFF
+ * - OR: If connection is lost, drone auto-disarms
  * 
  * ============================================================================
  */

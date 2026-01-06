@@ -1,781 +1,582 @@
-# Arduino Nano Quadcopter Flight Controller
+# Arduino Nano Quadcopter Flight Controller v2.0
 
-A professional-grade, production-quality flight controller firmware for Arduino Nano-based quadcopter systems. This project prioritizes flight stability, deterministic timing, robust RF communication, and comprehensive safety systems.
+A professional flight controller system for Arduino Nano with MPU6050 DMP, MS5611 barometer, and reliable NRF24L01 communication.
 
-## Table of Contents
+## Features
 
-- [System Overview](#system-overview)
-- [Hardware Configuration](#hardware-configuration)
-- [Software Architecture](#software-architecture)
-- [Timing Architecture](#timing-architecture)
-- [RF Communication Protocol](#rf-communication-protocol)
-- [Sensor Fusion](#sensor-fusion)
-- [PID Control System](#pid-control-system)
-- [Safety Systems](#safety-systems)
-- [Class Responsibility Breakdown](#class-responsibility-breakdown)
-- [Critical Implementation Details](#critical-implementation-details)
-- [Tuning Guide](#tuning-guide)
-- [Known Pitfalls](#known-pitfalls)
-- [Best Practices](#best-practices)
+- **MPU6050 with DMP** - Hardware-accelerated sensor fusion for stable attitude
+- **MS5611 Barometer** - Altitude hold and smooth landing capability
+- **NRF24L01 with ACK** - Reliable communication with packet confirmation
+- **Serial Debug** - Real-time monitoring on both devices
+- **Auto-Disarm** - Safety failsafe on connection loss
+- **Self-Leveling** - Angle mode for easy flying
 
 ---
 
-## System Overview
+## Required Libraries
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         QUADCOPTER SYSTEM ARCHITECTURE                       │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌──────────────────────┐              ┌──────────────────────────────────┐ │
-│  │   REMOTE CONTROLLER  │   2.4 GHz    │      FLIGHT CONTROLLER           │ │
-│  │   (Arduino Nano)     │◄────────────►│      (Arduino Nano)              │ │
-│  │                      │   NRF24L01   │                                  │ │
-│  │  ┌────────────────┐  │   50 Hz      │  ┌───────────┐  ┌─────────────┐  │ │
-│  │  │ Joysticks (4x) │  │              │  │  MPU6050  │  │ ESC x4      │  │ │
-│  │  │ A0-A3          │  │              │  │  I2C      │  │ D3,D5,D6,D9 │  │ │
-│  │  └────────────────┘  │              │  │  1000 Hz  │  │ 250 Hz      │  │ │
-│  │  ┌────────────────┐  │              │  └───────────┘  └─────────────┘  │ │
-│  │  │ Switches (2x)  │  │              │        │              ▲          │ │
-│  │  │ D2, D3         │  │              │        ▼              │          │ │
-│  │  └────────────────┘  │              │  ┌───────────┐  ┌─────────────┐  │ │
-│  │  ┌────────────────┐  │              │  │ Attitude  │  │ Motor Mixer │  │ │
-│  │  │ Buttons (2x)   │  │              │  │ Estimator │  │ Quad-X      │  │ │
-│  │  │ D4, D5         │  │              │  │ 500 Hz    │  │             │  │ │
-│  │  └────────────────┘  │              │  └───────────┘  └─────────────┘  │ │
-│  │  ┌────────────────┐  │              │        │              ▲          │ │
-│  │  │ NRF24L01       │  │              │        ▼              │          │ │
-│  │  │ CE:D9 CSN:D10  │  │              │  ┌─────────────────────────────┐ │ │
-│  │  └────────────────┘  │              │  │      PID Controllers        │ │ │
-│  └──────────────────────┘              │  │   Roll │ Pitch │ Yaw       │ │ │
-│                                        │  │         250 Hz              │ │ │
-│                                        │  └─────────────────────────────┘ │ │
-│                                        │  ┌─────────────┐ ┌────────────┐  │ │
-│                                        │  │ LED (D7)    │ │ Buzzer(D8) │  │ │
-│                                        │  │ Status      │ │ Feedback   │  │ │
-│                                        │  └─────────────┘ └────────────┘  │ │
-│                                        └──────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+### For Flight Controller:
+
+| Library | Author | Install Method | Purpose |
+|---------|--------|----------------|---------|
+| **I2Cdev** | Jeff Rowberg | Manual | I2C device communication |
+| **MPU6050** | Jeff Rowberg | Manual | IMU with DMP support |
+| **MS5611** | Rob Tillaart | Library Manager | Barometer for altitude |
+| **RF24** | TMRh20 | Library Manager | NRF24L01 communication |
+
+### For Remote Controller:
+
+| Library | Author | Install Method | Purpose |
+|---------|--------|----------------|---------|
+| **RF24** | TMRh20 | Library Manager | NRF24L01 communication |
 
 ---
 
-## Hardware Configuration
+## Library Installation
 
-### Flight Controller (Arduino Nano)
+### 1. RF24 Library (Arduino Library Manager)
 
-| Component | Pin | Description |
-|-----------|-----|-------------|
-| MPU6050 SDA | A4 | I2C Data |
-| MPU6050 SCL | A5 | I2C Clock |
-| MPU6050 INT | D2 | Data Ready Interrupt |
-| Motor FL (CCW) | D3 | Front-Left ESC (Timer2) |
-| Motor FR (CW) | D5 | Front-Right ESC (Timer0) |
-| Motor RL (CW) | D6 | Rear-Left ESC (Timer0) |
-| Motor RR (CCW) | D9 | Rear-Right ESC (Timer1) |
-| NRF24L01 CE | D4 | Chip Enable |
-| NRF24L01 CSN | D10 | Chip Select |
-| NRF24L01 SCK | D13 | SPI Clock |
-| NRF24L01 MOSI | D11 | SPI Data Out |
-| NRF24L01 MISO | D12 | SPI Data In |
-| LED | D7 | Arm Status Indicator |
-| Buzzer | D8 | Audio Feedback |
+```
+Arduino IDE → Sketch → Include Library → Manage Libraries
+Search: "RF24"
+Install: "RF24 by TMRh20"
+```
 
-### Remote Controller (Arduino Nano)
+### 2. MS5611 Library (Arduino Library Manager)
 
-| Component | Pin | Description |
-|-----------|-----|-------------|
-| NRF24L01 CE | D9 | Chip Enable |
-| NRF24L01 CSN | D10 | Chip Select |
-| Arm Switch | D2 | Toggle - Arm/Disarm |
-| Aux Switch | D3 | Toggle - Auxiliary |
-| Calibrate Button | D4 | Momentary - IMU Cal |
-| Motor Test Button | D5 | Momentary - Motor Test |
-| Throttle | A0 | Joystick Axis |
-| Yaw | A1 | Joystick Axis |
-| Pitch | A2 | Joystick Axis |
-| Roll | A3 | Joystick Axis |
-| Buzzer | D6 | Audio Feedback (Optional) |
+```
+Arduino IDE → Sketch → Include Library → Manage Libraries
+Search: "MS5611"
+Install: "MS5611 by Rob Tillaart"
+```
 
-### Motor Layout (Quad-X Configuration)
+### 3. I2Cdev + MPU6050 with DMP (Manual Installation)
+
+**Download from GitHub:**
+```
+https://github.com/jrowberg/i2cdevlib
+```
+
+**Installation Steps:**
+1. Download or clone the repository
+2. Navigate to: `i2cdevlib-master/Arduino/`
+3. Copy these folders to your Arduino libraries folder:
+   - `I2Cdev/`
+   - `MPU6050/`
+
+**Arduino Libraries Folder Location:**
+- Windows: `Documents/Arduino/libraries/`
+- Mac: `~/Documents/Arduino/libraries/`
+- Linux: `~/Arduino/libraries/`
+
+**Final structure should be:**
+```
+Arduino/libraries/
+├── I2Cdev/
+│   ├── I2Cdev.cpp
+│   ├── I2Cdev.h
+│   └── ...
+├── MPU6050/
+│   ├── MPU6050.cpp
+│   ├── MPU6050.h
+│   ├── MPU6050_6Axis_MotionApps20.h
+│   └── ...
+├── RF24/
+└── MS5611/
+```
+
+**Restart Arduino IDE after installation!**
+
+---
+
+## Hardware Wiring
+
+### Flight Controller (Drone)
+
+```
+ARDUINO NANO
+     ┌─────────────────────┐
+     │ D13  SCK ──────────────┐
+     │ D12  MISO ─────────────┼──┐
+     │ D11  MOSI ─────────────┼──┼──┐
+     │ D10  CSN ──────────────┼──┼──┼──────── NRF24L01 CSN
+     │ D9   MOTOR_RR ─────────┼──┼──┼──┐
+     │ D8   BUZZER ───────────┼──┼──┼──┼───── Buzzer +
+     │ D7   LED ──────────────┼──┼──┼──┼───── LED +
+     │ D6   MOTOR_RL ─────────┼──┼──┼──┼──┐
+     │ D5   MOTOR_FR ─────────┼──┼──┼──┼──┼── ESC FR Signal
+     │ D4   RF_CE ────────────┼──┼──┼──┼──┼── NRF24L01 CE
+     │ D3   MOTOR_FL ─────────┼──┼──┼──┼──┼── ESC FL Signal
+     │ D2   MPU_INT ──────────┼──┼──┼──┼──┼── MPU6050 INT
+     │                        │  │  │  │  │
+     │ A5   SCL ──────────────┼──┼──┼──┼──┼── MPU6050 & MS5611 SCL
+     │ A4   SDA ──────────────┼──┼──┼──┼──┼── MPU6050 & MS5611 SDA
+     │                        │  │  │  │  │
+     │ 5V  ───────────────────┼──┼──┼──┼──┼── MPU6050 VCC, MS5611 VCC, ESCs VCC
+     │ 3.3V ──────────────────┼──┼──┼──┼──┼── NRF24L01 VCC (3.3V ONLY!)
+     │ GND ───────────────────┴──┴──┴──┴──┴── All GND
+     └─────────────────────────────────────┘
+```
+
+### NRF24L01 Module (Both Devices)
+
+```
+NRF24L01 Pinout:
+┌─────────────┐
+│ GND     VCC │ ← 3.3V ONLY! (NOT 5V!)
+│ CE      CSN │
+│ SCK    MOSI │
+│ MISO    IRQ │ ← Not used
+└─────────────┘
+
+IMPORTANT: Add 10-100µF capacitor between VCC and GND!
+```
+
+### Remote Controller
+
+```
+ARDUINO NANO
+     ┌─────────────────────┐
+     │ D13  SCK ──────────────── NRF24L01 SCK
+     │ D12  MISO ─────────────── NRF24L01 MISO
+     │ D11  MOSI ─────────────── NRF24L01 MOSI
+     │ D10  CSN ──────────────── NRF24L01 CSN
+     │ D9   CE ───────────────── NRF24L01 CE
+     │ D7   LED ──────────────── LED + (220Ω to GND)
+     │ D6   BUZZER ───────────── Buzzer + (100Ω to GND)
+     │ D5   BTN_MOTOR ────────── Motor Test Button → GND
+     │ D4   BTN_CALIB ────────── Calibrate Button → GND
+     │ D3   SW_ALTHOLD ───────── Alt Hold Toggle → GND
+     │ D2   SW_ARM ───────────── Arm Toggle → GND
+     │                        
+     │ A3   ROLL ─────────────── Joystick Roll
+     │ A2   PITCH ────────────── Joystick Pitch
+     │ A1   YAW ──────────────── Joystick Yaw
+     │ A0   THROTTLE ─────────── Joystick Throttle
+     │                        
+     │ 5V  ───────────────────── Joysticks VCC
+     │ 3.3V ──────────────────── NRF24L01 VCC
+     │ GND ───────────────────── All GND
+     └─────────────────────────────────────┘
+```
+
+### Motor Layout (Quad-X)
 
 ```
         FRONT
     FL (CCW)    FR (CW)
-         \      /
-          \    /
-           \  /
-            \/
-            /\
-           /  \
-          /    \
-         /      \
-    RL (CW)    RR (CCW)
+       D3          D5
+         \        /
+          \      /
+           \    /
+            \  /
+             \/
+             /\
+            /  \
+           /    \
+          /      \
+         /        \
+       D6          D9
+    RL (CW)     RR (CCW)
         REAR
 
-Motor Mixing Matrix:
-┌────────┬──────────┬───────┬───────┬──────┐
-│ Motor  │ Throttle │ Roll  │ Pitch │ Yaw  │
-├────────┼──────────┼───────┼───────┼──────┤
-│ FL     │    +     │   -   │   +   │  -   │
-│ FR     │    +     │   +   │   +   │  +   │
-│ RL     │    +     │   -   │   -   │  +   │
-│ RR     │    +     │   +   │   -   │  -   │
-└────────┴──────────┴───────┴───────┴──────┘
+Motor Rotation:
+  FL = Counter-Clockwise (CCW)
+  FR = Clockwise (CW)
+  RL = Clockwise (CW)
+  RR = Counter-Clockwise (CCW)
 ```
 
 ---
 
-## Software Architecture
+## Configuration
 
-### Design Principles
+### RF Channel
 
-1. **Object-Oriented in Single File**: All classes defined in single `.ino` for Arduino IDE compatibility
-2. **Non-Blocking Design**: No blocking delays in main loop; all timing via `micros()` scheduling
-3. **Deterministic Timing**: Fixed-period task execution for consistent control behavior
-4. **Fail-Safe Priority**: Safety checks execute before control calculations
+**CRITICAL: Both devices MUST use the same RF channel!**
 
-### Class Hierarchy
+Edit this line in BOTH `.ino` files:
 
+```cpp
+#define RF_CHANNEL          108    // Use same value on both!
 ```
-FlightController (Main State Machine)
-├── IMU
-│   ├── Raw sensor reading
-│   ├── Calibration management
-│   └── Low-pass filtering
-├── AttitudeEstimator
-│   └── Complementary filter fusion
-├── PIDController (x3)
-│   ├── Roll (angle mode)
-│   ├── Pitch (angle mode)
-│   └── Yaw (rate mode)
-├── RadioLink
-│   ├── Packet reception
-│   ├── Link quality monitoring
-│   └── Failsafe detection
-├── MotorMixer
-│   ├── Quad-X mixing
-│   └── ESC PWM generation
-└── UserInterface
-    ├── LED control
-    └── Buzzer patterns
+
+Valid range: 0-125 (use 100+ to avoid WiFi interference)
+
+### Serial Debug
+
+Both devices output debug info at 115200 baud:
+
+```cpp
+#define DEBUG_SERIAL        true
+#define SERIAL_BAUD         115200
 ```
 
 ---
 
-## Timing Architecture
+## How to Use
 
-### Frequency Allocation
+### Step 1: Upload Firmware
 
-```
-┌──────────────────┬──────────┬────────────┬─────────────────────────────────┐
-│ Subsystem        │ Frequency│ Period     │ Rationale                       │
-├──────────────────┼──────────┼────────────┼─────────────────────────────────┤
-│ IMU Sampling     │ 1000 Hz  │ 1.0 ms     │ Nyquist for 500Hz fusion        │
-│ Attitude Fusion  │ 500 Hz   │ 2.0 ms     │ 2x PID rate for interpolation   │
-│ PID Control      │ 250 Hz   │ 4.0 ms     │ Standard for multirotor         │
-│ ESC Update       │ 250 Hz   │ 4.0 ms     │ Synchronized with PID           │
-│ RF Reception     │ 50 Hz    │ 20.0 ms    │ Human input bandwidth           │
-│ LED Update       │ 2 Hz     │ 500.0 ms   │ Visual status indication        │
-└──────────────────┴──────────┴────────────┴─────────────────────────────────┘
-```
+1. Open `quadcopter_remote/quadcopter_remote.ino` in Arduino IDE
+2. Select Board: "Arduino Nano"
+3. Select Port
+4. Upload to REMOTE Arduino
 
-### Timing Diagram
+5. Open `quadcopter_fc/quadcopter_fc.ino` in Arduino IDE
+6. Upload to DRONE Arduino
 
-```
-Time (ms): 0    1    2    3    4    5    6    7    8    9    10   ...  20
-           |    |    |    |    |    |    |    |    |    |    |         |
-IMU 1kHz:  ●────●────●────●────●────●────●────●────●────●────●────...──●
-           |         |         |         |         |         |         |
-ATT 500Hz: ●─────────●─────────●─────────●─────────●─────────●────...──●
-           |                   |                   |                   |
-PID 250Hz: ●───────────────────●───────────────────●──────────────...──●
-           |                                                           |
-RF 50Hz:   ●───────────────────────────────────────────────────────────●
-           |                   |                   |                   |
-ESC 250Hz: ●───────────────────●───────────────────●──────────────...──●
-           (synchronized with PID output)
+### Step 2: Open Serial Monitors
 
-Within each 4ms PID cycle:
-├── 4 IMU samples collected and averaged
-├── 2 attitude estimates computed
-├── 1 PID calculation (Roll, Pitch, Yaw)
-└── 1 ESC update (4 motors)
-```
+Open two serial monitors (115200 baud):
+- One for Remote Controller
+- One for Flight Controller
 
-### Why Timing Matters
-
-**Mismatched frequencies cause:**
-
-| Problem | Cause | Symptom |
-|---------|-------|---------|
-| Attitude drift | Inconsistent fusion dt | Slow roll/pitch in one direction |
-| PID oscillation | Variable derivative dt | Motor twitching, "toilet bowl" |
-| Control aliasing | IMU < 2x PID rate | Phase lag, sluggish response |
-| ESC desync | PWM faster than ESC | Motor stuttering, sync loss |
-| RF latency | Blocking operations | Delayed control response |
-
----
-
-## RF Communication Protocol
-
-### Design Decisions
-
-#### ACK vs NO_ACK Mode: **NO_ACK Selected**
-
-| Factor | ACK Mode | NO_ACK Mode |
-|--------|----------|-------------|
-| Latency | 3-5 ms | ~1 ms |
-| Reliability | Guaranteed delivery | Best-effort |
-| Complexity | Retry logic needed | Simple |
-| For Control Systems | ❌ Old data useless | ✅ Fresh data priority |
-
-**Rationale**: In real-time control, a 20ms-old packet arriving with ACK is less valuable than dropping it and using the next fresh packet. Failsafe handles sustained loss.
-
-#### Channel Selection: **108 (2.508 GHz)**
-
-- Above WiFi band (2.4-2.4835 GHz)
-- Reduces interference in typical environments
-- Within NRF24L01 range (2.4-2.525 GHz)
-
-#### Data Rate: **2 Mbps**
-
-- Shorter air time = less collision probability
-- Trade-off: Slightly reduced range (acceptable for LOS operation)
-
-### Packet Structure (16 bytes)
+### Step 3: Power On Sequence
 
 ```
-┌─────────┬─────────┬─────────┬─────────┬──────────┬──────────┬──────────┬──────────┬─────────┐
-│ Byte    │ 0-1     │ 2-3     │ 4-5     │ 6-7      │ 8        │ 9        │ 10-13    │ 14-15   │
-├─────────┼─────────┼─────────┼─────────┼──────────┼──────────┼──────────┼──────────┼─────────┤
-│ Field   │Throttle │ Yaw     │ Pitch   │ Roll     │ Switches │ Checksum │ Sequence │Reserved │
-│ Type    │ uint16  │ int16   │ int16   │ int16    │ uint8    │ uint8    │ uint32   │ uint16  │
-│ Range   │ 0-1000  │±500     │±500     │±500      │ Bitfield │ XOR      │ Counter  │ Future  │
-└─────────┴─────────┴─────────┴─────────┴──────────┴──────────┴──────────┴──────────┴─────────┘
+1. Power ON the REMOTE first
+   → Wait for startup beeps (ascending tones)
+   → LED blinks fast (searching for drone)
 
-Switches Bitfield:
-┌─────┬─────────────────┐
-│ Bit │ Function        │
-├─────┼─────────────────┤
-│ 0   │ Arm/Disarm      │
-│ 1   │ Calibrate       │
-│ 2   │ Motor Test      │
-│ 3   │ Auxiliary       │
-│ 4-7 │ Reserved        │
-└─────┴─────────────────┘
+2. Ensure ARM switch is OFF
+
+3. Power ON the DRONE
+   → Wait for startup beeps
+   → Watch for "MPU6050 connected" in serial
+   → Watch for "MS5611 connected" in serial
+   → Watch for "Waiting for RC connection..."
+
+4. Wait for pairing:
+   → Remote: 3 beeps when connected
+   → Drone: 5 beeps when paired
+   → Both serial monitors show "CONNECTED"
 ```
 
-### Failsafe Behavior
+### Step 4: Pre-Flight Checks
 
 ```
-┌─────────────────────┬────────────────────┬─────────────────────────────────┐
-│ Time Since Packet   │ Link State         │ Action                          │
-├─────────────────────┼────────────────────┼─────────────────────────────────┤
-│ 0-500 ms            │ CONNECTED          │ Normal operation                │
-│ 500-1000 ms         │ DEGRADED           │ LED warning, reduced authority  │
-│ >1000 ms            │ FAILSAFE           │ Motors cut, buzzer alarm        │
-└─────────────────────┴────────────────────┴─────────────────────────────────┘
+1. Verify in serial monitor:
+   - RF: CONNECTED
+   - IMU angles stable (Roll≈0, Pitch≈0)
+   - ALT reading valid
+
+2. Move joysticks and verify:
+   - CMD values change in drone serial
+   - Throttle: 0-1000
+   - Roll/Pitch/Yaw: -45 to +45 degrees
+
+3. Ensure throttle is at MINIMUM (0)
+
+4. Flip ARM switch ON
+   → Drone beeps (ascending tone)
+   → Drone LED goes SOLID
+   → Serial shows "*** ARMED ***"
+```
+
+### Step 5: Flying
+
+```
+1. Slowly increase throttle
+2. Use Roll/Pitch to control position
+3. Use Yaw to rotate
+4. Flip Alt Hold switch to maintain altitude
+```
+
+### Step 6: Landing
+
+```
+1. Reduce throttle slowly
+2. OR flip Alt Hold OFF and reduce throttle
+3. When landed, flip ARM switch OFF
+   → Motors stop immediately
+   → Drone beeps (descending tone)
 ```
 
 ---
 
-## Sensor Fusion
+## Serial Monitor Output
 
-### Complementary Filter vs DMP
-
-| Criterion | Complementary Filter | MPU6050 DMP |
-|-----------|---------------------|-------------|
-| Latency | <100 μs | 2-4 ms |
-| Tunability | Full control | Black box |
-| CPU Usage | ~50 μs/cycle | ~20 μs (HW) |
-| Complexity | Simple | FIFO management |
-| Failure Modes | Predictable | Unknown |
-| Drift (no mag) | Yaw drifts | Yaw drifts |
-
-**Decision: Complementary Filter**
-
-For a 250 Hz PID loop (4ms period), DMP's 2-4ms latency consumes 50-100% of the control period. The complementary filter's sub-millisecond latency preserves control bandwidth.
-
-### Filter Implementation
+### Remote Controller
 
 ```
-angle = α × (angle + gyro_rate × dt) + (1-α) × accel_angle
-
-Where:
-- α = 0.98 (gyro trust factor)
-- dt = 2ms (fusion period)
-- Time constant τ = dt/(1-α) ≈ 100ms
-```
-
-### Why These Parameters?
-
-- **α = 0.98**: Trusts gyro for short-term, accel for long-term drift correction
-- **τ ≈ 100ms**: Fast enough to correct drift before visible attitude error
-- **500 Hz fusion**: Captures all gyro dynamics, averages accel noise
-
+--- RC STATUS ---
+RF: CONNECTED | Sent: 1523 | ACK: 1520 | Fail: 3 | Rate: 99.8%
+RAW: T=12 Y=508 P=515 R=510
+OUT: T=0 Y=0 P=0 R=0
+SW: ARM=OFF ALT=OFF CAL=OFF MTR=OFF
 ---
-
-## PID Control System
-
-### Control Architecture
-
-```
-                    ┌─────────────────────────────────────────────────────┐
-                    │              ANGLE MODE CONTROL                      │
-                    │                                                      │
-   Stick Input      │    ┌─────────┐     ┌─────────┐     ┌──────────┐    │
-  (±50° desired)───►│───►│  Error  │────►│   PID   │────►│  Motor   │───►│──► Motors
-                    │    │ Calc    │     │  Roll   │     │  Mixer   │    │
-   Current Angle────│───►│         │     │  Pitch  │     │          │    │
-   (from IMU)       │    └─────────┘     └─────────┘     └──────────┘    │
-                    │                                                      │
-                    └─────────────────────────────────────────────────────┘
-
-                    ┌─────────────────────────────────────────────────────┐
-                    │               RATE MODE (YAW ONLY)                   │
-                    │                                                      │
-   Stick Input      │    ┌─────────┐     ┌─────────┐     ┌──────────┐    │
-  (±180°/s desired)─│───►│  Error  │────►│   PID   │────►│  Motor   │───►│──► Motors
-                    │    │ Calc    │     │   Yaw   │     │  Mixer   │    │
-   Gyro Rate────────│───►│         │     │         │     │          │    │
-   (from IMU)       │    └─────────┘     └─────────┘     └──────────┘    │
-                    │                                                      │
-                    └─────────────────────────────────────────────────────┘
 ```
 
-### PID Features
-
-1. **Derivative on Measurement** (not error)
-   - Prevents derivative kick on setpoint changes
-   - `d_term = Kd × -d(measurement)/dt`
-
-2. **Integral Anti-Windup**
-   - Clamps integral term to ±200
-   - Back-calculation: reduces integral when output saturates
-
-3. **Derivative Low-Pass Filter**
-   - IIR filter with α = 0.7
-   - Reduces noise amplification from derivative term
-
-### Default Gains (Starting Point)
+### Flight Controller
 
 ```
-Roll/Pitch (Angle Mode):
-  Kp = 4.0   (Proportional response to angle error)
-  Ki = 0.02  (Integral to eliminate steady-state error)
-  Kd = 1.5   (Derivative to damp oscillations)
-
-Yaw (Rate Mode):
-  Kp = 3.0
-  Ki = 0.01
-  Kd = 0.0   (Often zero for rate mode)
+--- STATUS ---
+State: DISARMED
+RF: CONNECTED | Pkts: 1520 | Lost: 3 | Last: 15ms ago
+IMU: Roll=0.5° Pitch=-0.3° Yaw=45.2°
+ALT: 0.12m | Vvel: 0.01m/s
+CMD: Thr=0 R=0.0 P=0.0 Y=0.0 AltHold=OFF
+MTR: FL=1000 FR=1000 RL=1000 RR=1000
+---
 ```
 
 ---
 
-## Safety Systems
+## Safety Features
+
+### Auto-Disarm on Connection Loss
+
+If RF connection is lost for more than 500ms:
+- Motors immediately stop
+- State changes to FAILSAFE
+- Buzzer sounds alarm
+- Must reconnect and disarm/rearm to fly again
 
 ### Arming Requirements
 
-All conditions must be met:
+All conditions must be met to arm:
+1. ✅ ARM switch ON (transition from OFF)
+2. ✅ Throttle at minimum (< 5%)
+3. ✅ RF connected
+4. ✅ IMU (DMP) ready
+5. ✅ Not in error state
 
-1. ✅ Arm switch transitions from OFF → ON (edge detection)
-2. ✅ Throttle ≤ 5% (prevents sudden motor spin)
-3. ✅ IMU calibrated
-4. ✅ RF link connected
-5. ✅ Not in calibration or motor test mode
+### Disarm Conditions
 
-### State Machine
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                      FLIGHT CONTROLLER STATE MACHINE                    │
-├────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│    ┌──────────┐                                                        │
-│    │   INIT   │──────────────────────────────────┐                     │
-│    └────┬─────┘                                  │                     │
-│         │ Success                                │ Failure             │
-│         ▼                                        ▼                     │
-│    ┌──────────┐     Cal Button              ┌──────────┐              │
-│    │ DISARMED │◄────────────────────────────│  ERROR   │              │
-│    └────┬─────┘◄──────────────┐             └──────────┘              │
-│         │                      │                                       │
-│         │ Arm Switch ON        │ Arm Switch OFF                       │
-│         │ Throttle Low         │                                       │
-│         │ RF Connected         │                                       │
-│         │ IMU Calibrated       │                                       │
-│         ▼                      │                                       │
-│    ┌──────────┐                │                                       │
-│    │  ARMED   │────────────────┤                                       │
-│    └────┬─────┘                │                                       │
-│         │                      │                                       │
-│         │ RF Timeout           │ RF Recovery                           │
-│         ▼                      │ + Disarm                              │
-│    ┌──────────┐                │                                       │
-│    │ FAILSAFE │────────────────┘                                       │
-│    └──────────┘                                                        │
-│                                                                         │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
-### LED Behavior
-
-| State | LED Pattern |
-|-------|-------------|
-| Initializing | Fast blink (100ms) |
-| Disarmed | Slow blink (500ms) |
-| Armed | Solid ON |
-| Failsafe | Very fast blink (100ms) |
-| Error | Very fast blink (50ms) |
-| Calibrating | Fast blink (50ms) |
-
-### Buzzer Patterns
-
-| Event | Pattern |
-|-------|---------|
-| Button press | Single short beep (50ms) |
-| RF paired | 5 beeps |
-| Calibration start | Long low beep |
-| Calibration done | Rising tone sequence |
-| Armed | Two-tone rising |
-| Disarmed | Single falling tone |
-| Ready to fly | Four-tone rising |
-| Failsafe | Long low alarm |
-| Error | Three rapid beeps |
+Drone disarms when:
+- ARM switch turned OFF
+- RF connection lost > 500ms
+- Any critical error detected
 
 ---
 
-## Class Responsibility Breakdown
+## Troubleshooting
 
-### IMU Class
+### Problem: "NRF24L01 not found!"
 
-**Purpose**: Hardware abstraction for MPU6050
+**Causes:**
+1. Wiring incorrect
+2. Using 5V instead of 3.3V
+3. No capacitor on NRF24L01 VCC
 
-**Responsibilities**:
-- Initialize MPU6050 via I2C (400kHz)
-- Configure DLPF (44Hz cutoff), ranges (±2g, ±250°/s)
-- Burst-read sensor data (14 bytes in single transaction)
-- Apply calibration offsets
-- Software low-pass filtering (IIR)
-- Manage calibration procedure
+**Solutions:**
+- Check all SPI connections (SCK, MISO, MOSI, CSN, CE)
+- Verify 3.3V power (NOT 5V!)
+- Add 10-100µF capacitor between VCC and GND
+- Try a different NRF24L01 module
 
-**Key Methods**:
-```cpp
-bool begin()           // Initialize sensor
-bool readRaw()         // Burst read from I2C
-void processData()     // Apply calibration, scaling, filtering
-void calibrate()       // 2-second calibration routine
-```
+### Problem: "MPU6050 connection failed!"
 
-### AttitudeEstimator Class
+**Causes:**
+1. I2C wiring wrong
+2. Wrong I2C address
+3. Damaged sensor
 
-**Purpose**: Fuse IMU data into attitude angles
+**Solutions:**
+- Check SDA (A4) and SCL (A5) connections
+- Run I2C scanner to find address
+- Try 0x68 or 0x69 address
 
-**Responsibilities**:
-- Implement complementary filter
-- Convert body rates to Euler rate
-- Handle gimbal lock near ±90° pitch
-- Normalize yaw to ±180°
+### Problem: No communication (0 packets)
 
-**Key Methods**:
-```cpp
-void update(const IMU::Data&)  // Run fusion algorithm
-float getRoll()                 // Get roll angle (degrees)
-float getPitch()                // Get pitch angle (degrees)
-float getYaw()                  // Get yaw angle (degrees)
-```
+**Causes:**
+1. Different RF channels
+2. Wrong pipe address
+3. Interference
 
-### PIDController Class
+**Solutions:**
+- Verify `RF_CHANNEL` matches on both devices (check carefully!)
+- Verify `PIPE_ADDRESS` matches ("QUAD1")
+- Try different channel (100-120)
+- Add capacitor to NRF24L01
+- Move away from WiFi routers
 
-**Purpose**: Generic PID implementation with safety features
+### Problem: High packet loss (>5%)
 
-**Responsibilities**:
-- Compute PID output from setpoint and measurement
-- Derivative filtering
-- Integral anti-windup (clamping + back-calculation)
-- Output limiting
+**Causes:**
+1. Poor power supply
+2. Interference
+3. Antenna issues
 
-**Key Methods**:
-```cpp
-void setGains(float kp, float ki, float kd)
-void setIntegralLimits(float min, float max)
-void setOutputLimits(float min, float max)
-float calculate(float setpoint, float measurement, float dt)
-void reset()
-```
+**Solutions:**
+- Add larger capacitor (100µF) to NRF24L01
+- Change RF channel
+- Improve antenna orientation (vertical)
+- Reduce distance for testing
 
-### RadioLink Class
+### Problem: DMP initialization failed
 
-**Purpose**: NRF24L01 communication management
+**Causes:**
+1. MPU6050 not level during calibration
+2. I2C speed issue
+3. Library issue
 
-**Responsibilities**:
-- Configure and manage NRF24L01
-- Receive and validate packets (checksum)
-- Track packet sequence for loss detection
-- Manage link state machine
-- Trigger failsafe on timeout
+**Solutions:**
+- Keep drone perfectly level and still during startup
+- Check I2C at 400kHz
+- Reinstall I2Cdev and MPU6050 libraries
 
-**Key Methods**:
-```cpp
-bool begin()                   // Initialize radio
-bool update()                  // Check for packets, update state
-LinkState getLinkState()       // Get current link status
-const ControlPacket& getLastPacket()  // Get last valid packet
-bool isFailsafe()              // Check if in failsafe
-```
+### Problem: Motors don't spin when armed
 
-### MotorMixer Class
+**Causes:**
+1. ESC not calibrated
+2. ESC not receiving signal
+3. Throttle not at zero
 
-**Purpose**: Convert control outputs to motor commands
-
-**Responsibilities**:
-- Implement Quad-X mixing matrix
-- Generate PWM signals for ESCs
-- Enforce motor limits
-- Arm/disarm control
-- Motor test sequence
-
-**Key Methods**:
-```cpp
-void begin()           // Attach ESC servos
-void mix(throttle, roll, pitch, yaw)  // Calculate and output
-void arm() / disarm()  // Motor enable control
-void motorTest()       // Test sequence (PROPS OFF!)
-```
-
-### FlightController Class
-
-**Purpose**: Main orchestrator and state machine
-
-**Responsibilities**:
-- Initialize all subsystems
-- Manage timing for all tasks
-- Implement state machine
-- Coordinate safety checks
-- Handle user inputs
-
-**Key Methods**:
-```cpp
-void begin()     // Initialize everything
-void update()    // Main loop - call as fast as possible
-State getState() // Get current state
-```
+**Solutions:**
+- Calibrate ESCs (all-high then all-low procedure)
+- Check ESC signal wire connections
+- Verify throttle shows 0 in serial monitor
+- Check motor output values (should be 1000 when armed, low throttle)
 
 ---
 
-## Critical Implementation Details
+## ACK Mode Explanation
 
-### I2C Speed
+This firmware uses **ACK (Acknowledgment) mode** for RF communication:
+
+### Why ACK Mode?
+
+| Aspect | ACK Mode | NO_ACK Mode |
+|--------|----------|-------------|
+| Reliability | ✅ Confirmed delivery | ❌ Best-effort |
+| Latency | ~1-4ms | ~1ms |
+| Debugging | ✅ Know if packets arrive | ❌ Guessing |
+| Safety | ✅ Know connection state | ❌ Uncertain |
+
+### How it works:
+
+1. Remote sends packet
+2. Drone receives and sends ACK back
+3. If no ACK in 1.5ms, Remote retries (up to 3 times)
+4. If all retries fail, packet marked as failed
+5. Success rate tracked and displayed
+
+### Latency Analysis:
+
+- Packet transmission: ~0.5ms
+- ACK response: ~0.5ms  
+- Retry (if needed): +1.5ms each
+- Worst case (3 retries): ~5ms
+- Typical case: ~1ms
+
+At 50Hz transmission (20ms period), even 5ms latency is acceptable.
+
+---
+
+## Sensor Roles
+
+### MPU6050 (IMU with DMP)
+
+**Purpose:** Stability and auto-level
+
+**What it measures:**
+- Gyroscope: Angular velocity (how fast rotating)
+- Accelerometer: Linear acceleration (which way is down)
+
+**DMP (Digital Motion Processor):**
+- Onboard sensor fusion
+- Outputs quaternions
+- ~100Hz update rate
+- Provides: Roll, Pitch, Yaw angles
+
+**Why DMP?**
+- Offloads computation from Arduino
+- Built-in sensor fusion algorithm
+- Lower latency than software fusion
+- More stable attitude estimate
+
+### MS5611 (Barometer)
+
+**Purpose:** Altitude hold and smooth landing
+
+**What it measures:**
+- Air pressure (mbar)
+- Converted to altitude using barometric formula
+
+**Features:**
+- ~40Hz update rate
+- Resolution: ~10cm
+- Complementary filter for smooth readings
+
+**Enables:**
+- Altitude hold mode
+- Smooth vertical control
+- Controlled descent for landing
+
+---
+
+## PID Tuning
+
+### Default Values
 
 ```cpp
-Wire.setClock(400000);  // 400kHz Fast Mode
+// Roll/Pitch (angle mode)
+pidRoll.kp = 4.0f;
+pidRoll.ki = 0.02f;
+pidRoll.kd = 1.5f;
+
+// Yaw (rate mode)
+pidYaw.kp = 3.0f;
+pidYaw.ki = 0.01f;
+pidYaw.kd = 0.0f;
+
+// Altitude hold
+pidAlt.kp = 50.0f;
+pidAlt.ki = 0.5f;
+pidAlt.kd = 30.0f;
 ```
 
-At 100kHz (default), reading 14 bytes takes ~1.4ms, exceeding our 1ms IMU budget. 400kHz brings this to ~350μs.
-
-### No Blocking Code
-
-The only blocking operations occur during:
-- Calibration (user-initiated, disarmed)
-- Motor test (user-initiated, disarmed)
-- Buzzer patterns (brief, acceptable)
-
-Main loop runs continuously with timing gates:
-
-```cpp
-if (now - lastPidTime >= PID_PERIOD_US) {
-    lastPidTime = now;
-    // Execute PID
-}
-```
-
-### Memory Usage
-
-| Resource | Used | Available | Headroom |
-|----------|------|-----------|----------|
-| Flash | ~20 KB | 32 KB | 12 KB |
-| RAM | ~1.2 KB | 2 KB | 800 B |
-| Stack | ~200 B | - | Sufficient |
-
-### Timer Conflicts
-
-ESC PWM uses Servo library (Timer1). Avoid:
-- `tone()` on pins 9, 10 (Timer1)
-- `analogWrite()` on pins 9, 10 during flight
-
----
-
-## Tuning Guide
-
-### Ziegler-Nichols Method (Modified)
-
-1. Set Ki = 0, Kd = 0
-2. Increase Kp until consistent oscillation
-3. Note ultimate gain Ku and period Tu
-4. Calculate:
-   - Kp = 0.6 × Ku
-   - Ki = 2 × Kp / Tu
-   - Kd = Kp × Tu / 8
-5. Fine-tune from this starting point
-
-### Typical Gain Ranges (250mm frame)
-
-```
-┌──────────┬─────────┬─────────┬─────────┐
-│ Axis     │ Kp      │ Ki      │ Kd      │
-├──────────┼─────────┼─────────┼─────────┤
-│ Roll     │ 2.0-8.0 │ 0.01-0.1│ 0.5-3.0 │
-│ Pitch    │ 2.0-8.0 │ 0.01-0.1│ 0.5-3.0 │
-│ Yaw      │ 2.0-5.0 │ 0.01-0.1│ 0.0-1.0 │
-└──────────┴─────────┴─────────┴─────────┘
-```
-
-### Tuning Symptoms
-
-| Symptom | Likely Cause | Adjustment |
-|---------|--------------|------------|
-| Oscillation | Kp too high | Reduce Kp, increase Kd |
-| Sluggish | Kp too low | Increase Kp |
-| Drift | Ki too low | Increase Ki |
-| Bounce-back | Ki too high | Reduce Ki |
-| Noisy motors | Kd too high | Reduce Kd, check vibration |
-| Toilet bowl | Timing issues | Check loop timing consistency |
-
----
-
-## Known Pitfalls
-
-### 1. Variable Loop Timing
-
-**Problem**: Using `delay()` or blocking operations causes inconsistent PID timing.
-
-**Symptom**: Derivative term causes oscillation.
-
-**Solution**: Use `micros()` scheduling with fixed periods.
-
-### 2. I2C Blocking on Error
-
-**Problem**: I2C operations can hang if sensor disconnects.
-
-**Solution**: Implement timeout in I2C operations, handle errors gracefully.
-
-### 3. SPI Contention
-
-**Problem**: RF and ESC updates can conflict on SPI bus.
-
-**Symptom**: Corrupted packets, motor glitches.
-
-**Solution**: Separate timing for RF (50Hz) and ESC (250Hz), use different timeslots.
-
-### 4. Accelerometer Noise During Flight
-
-**Problem**: Vibration causes accelerometer readings to be unreliable.
-
-**Symptom**: Attitude drift during aggressive maneuvers.
-
-**Solution**: 
-- Increase complementary filter α (trust gyro more)
-- Soft-mount IMU
-- DLPF at 44Hz or lower
-
-### 5. ESC Calibration
-
-**Problem**: ESCs not calibrated to same throttle range.
-
-**Symptom**: Quad tilts at hover throttle.
-
-**Solution**: Calibrate all ESCs to same range (1000-2000μs).
-
-### 6. Prop Direction
-
-**Problem**: Props spinning wrong direction.
-
-**Symptom**: Quad flips on takeoff.
-
-**Solution**: Verify motor directions match mixing matrix (FL=CCW, FR=CW, etc.).
-
-### 7. RF Antenna Orientation
-
-**Problem**: Antenna perpendicular to receiver.
-
-**Symptom**: Intermittent signal loss.
-
-**Solution**: Keep antennas vertical, maintain line-of-sight.
-
----
-
-## Best Practices
-
-### Pre-Flight Checklist
-
-1. ☐ Props secure, correct rotation
-2. ☐ Battery charged, secured
-3. ☐ IMU calibration performed on level surface
-4. ☐ Throttle at minimum before powering on
-5. ☐ Arm switch OFF before powering on
-6. ☐ Visual check of all connections
-7. ☐ Clear area (3m radius minimum)
-8. ☐ Radio link verified (LED behavior)
-
-### Code Quality
-
-1. **No magic numbers**: All constants in named namespaces
-2. **Explicit types**: Use `uint16_t`, `int32_t` instead of `int`
-3. **Const correctness**: Mark read-only variables `const`
-4. **Single responsibility**: Each class has one job
-5. **Fail-safe defaults**: Motors OFF on any error
-
-### Hardware Reliability
-
-1. **Capacitor on NRF24L01**: 10-100μF across VCC-GND
-2. **Ferrite beads**: On motor power leads
-3. **Soft mounting**: Vibration isolation for IMU
-4. **Proper wire gauge**: ESC leads appropriately sized
-5. **Strain relief**: On all connectors
-
----
-
-## Dependencies
-
-- **RF24 Library**: TMRH20 fork (https://github.com/nRF24/RF24)
-- **Wire Library**: Built-in Arduino I2C
-- **Servo Library**: Built-in Arduino PWM
-- **SPI Library**: Built-in Arduino SPI
-
-Install via Arduino Library Manager:
-```
-RF24 by TMRh20
-```
-
----
-
-## Building and Uploading
-
-1. Open `quadcopter_fc/quadcopter_fc.ino` in Arduino IDE
-2. Select Board: "Arduino Nano"
-3. Select Processor: "ATmega328P" (or "Old Bootloader" if needed)
-4. Select Port
-5. Upload
-
-Repeat for `quadcopter_remote/quadcopter_remote.ino` on the remote controller Nano.
-
----
-
-## License
-
-This project is provided for educational purposes. Use at your own risk. Always prioritize safety when working with multirotors.
+### Tuning Process
+
+1. Start with Kp only (Ki=0, Kd=0)
+2. Increase Kp until oscillation
+3. Reduce Kp by 30%
+4. Add Kd to dampen oscillation
+5. Add small Ki to eliminate drift
+
+### Symptoms and Fixes
+
+| Symptom | Fix |
+|---------|-----|
+| Oscillation | Reduce Kp or increase Kd |
+| Sluggish response | Increase Kp |
+| Drifts over time | Increase Ki |
+| Overshoots | Increase Kd or reduce Kp |
+| Noisy motors | Reduce Kd |
 
 ---
 
 ## Version History
 
-- **1.0.0**: Initial release
-  - Complete flight controller implementation
-  - Remote controller implementation
-  - Comprehensive documentation
+- **v2.0.0**: Complete rewrite
+  - Added MPU6050 DMP support
+  - Added MS5611 barometer
+  - Changed to ACK mode
+  - Added serial debugging
+  - Added auto-disarm failsafe
+  - Added altitude hold
+
+- **v1.0.0**: Initial release
 
 ---
 
-*This firmware is designed for serious flight control applications. It is not a beginner tutorial. Ensure you understand the code before flying.*
+## Safety Warning
+
+⚠️ **IMPORTANT: Quadcopters are dangerous!**
+
+- Always remove propellers when testing
+- Test in open areas away from people
+- Keep a safe distance during flight
+- Have a spotter when flying
+- Never fly over people
+- Check all connections before each flight
+- Ensure batteries are secure
+- Know your local drone regulations
+
+---
+
+## License
+
+Educational use. Fly at your own risk.
