@@ -226,95 +226,160 @@ void mpuWriteReg(uint8_t reg, uint8_t val) {
     Wire.beginTransmission(0x68);
     Wire.write(reg);
     Wire.write(val);
-    Wire.endTransmission();
+    Wire.endTransmission(true);
+    delay(5);
 }
 
 uint8_t mpuReadReg(uint8_t reg) {
     Wire.beginTransmission(0x68);
     Wire.write(reg);
-    Wire.endTransmission(false);
-    Wire.requestFrom((uint8_t)0x68, (uint8_t)1);
-    return Wire.read();
+    if (Wire.endTransmission(false) != 0) return 0xFF;
+    Wire.requestFrom((uint8_t)0x68, (uint8_t)1, (uint8_t)true);
+    if (Wire.available()) return Wire.read();
+    return 0xFF;
 }
 
 bool mpuInit() {
     Serial.println(F("Init MPU6050..."));
     
-    // Check WHO_AM_I
-    uint8_t whoami = mpuReadReg(0x75);
-    Serial.print(F("  WHO_AM_I: 0x")); Serial.println(whoami, HEX);
-    if (whoami != 0x68 && whoami != 0x98) {
-        Serial.println(F("  ERROR: Wrong WHO_AM_I!"));
-        return false;
-    }
-    
-    // Reset device
-    mpuWriteReg(0x6B, 0x80);  // PWR_MGMT_1 = RESET
+    // Start with SLOW I2C
+    Wire.setClock(100000);
     delay(100);
     
-    // Wake up, use PLL with X gyro
-    mpuWriteReg(0x6B, 0x01);  // PWR_MGMT_1 = CLKSEL=1
+    // First, wake up the device by writing to PWR_MGMT_1
+    // Some clones need this before WHO_AM_I works
+    Serial.println(F("  Waking up MPU..."));
+    Wire.beginTransmission(0x68);
+    Wire.write(0x6B);  // PWR_MGMT_1
+    Wire.write(0x00);  // Wake up
+    Wire.endTransmission(true);
+    delay(100);
+    
+    // Try reading WHO_AM_I multiple times
+    uint8_t whoami = 0xFF;
+    for (int attempt = 0; attempt < 5; attempt++) {
+        Wire.beginTransmission(0x68);
+        Wire.write(0x75);  // WHO_AM_I register
+        if (Wire.endTransmission(false) == 0) {
+            Wire.requestFrom((uint8_t)0x68, (uint8_t)1, (uint8_t)true);
+            delay(10);
+            if (Wire.available()) {
+                whoami = Wire.read();
+                Serial.print(F("  Attempt ")); Serial.print(attempt + 1);
+                Serial.print(F(" WHO_AM_I: 0x")); Serial.println(whoami, HEX);
+                if (whoami == 0x68 || whoami == 0x98 || whoami == 0x72) break;
+            }
+        }
+        delay(50);
+    }
+    
+    // Accept various MPU6050 clone IDs
+    if (whoami != 0x68 && whoami != 0x98 && whoami != 0x72 && whoami != 0x70 && whoami != 0x71) {
+        Serial.print(F("  WARNING: Unexpected WHO_AM_I: 0x")); Serial.println(whoami, HEX);
+        Serial.println(F("  Trying anyway (might be clone)..."));
+    }
+    
+    // Full reset sequence
+    Serial.println(F("  Resetting MPU..."));
+    mpuWriteReg(0x6B, 0x80);  // RESET
+    delay(150);
+    
+    // Clear sleep mode
+    mpuWriteReg(0x6B, 0x00);
+    delay(100);
+    
+    // Set clock source to X gyro
+    mpuWriteReg(0x6B, 0x01);
     delay(50);
     
-    // Sample rate divider: 1kHz / (1+3) = 250Hz
-    mpuWriteReg(0x19, 0x03);
-    
-    // DLPF config: 44Hz bandwidth
-    mpuWriteReg(0x1A, 0x03);
-    
-    // Gyro config: ±500°/s (FS_SEL=1)
-    mpuWriteReg(0x1B, 0x08);
-    
-    // Accel config: ±8g (AFS_SEL=2)
-    mpuWriteReg(0x1C, 0x10);
-    
-    // Disable I2C master mode
+    // Disable I2C master
     mpuWriteReg(0x6A, 0x00);
+    delay(10);
+    
+    // Sample rate = 1kHz / (1+3) = 250Hz
+    mpuWriteReg(0x19, 0x03);
+    delay(10);
+    
+    // DLPF: 44Hz bandwidth
+    mpuWriteReg(0x1A, 0x03);
+    delay(10);
+    
+    // Gyro: ±500°/s
+    mpuWriteReg(0x1B, 0x08);
+    delay(10);
+    
+    // Accel: ±8g
+    mpuWriteReg(0x1C, 0x10);
+    delay(10);
     
     // Disable FIFO
     mpuWriteReg(0x23, 0x00);
+    delay(10);
     
+    // Now switch to fast I2C
+    Wire.setClock(400000);
     delay(50);
     
     // Test read
-    if (mpuRead()) {
-        Serial.println(F("  MPU6050 OK!"));
-        Serial.print(F("  Raw: A=")); 
-        Serial.print(accelX); Serial.print(F(",")); 
-        Serial.print(accelY); Serial.print(F(","));
-        Serial.print(accelZ);
-        Serial.print(F(" G=")); 
-        Serial.print(gyroX); Serial.print(F(",")); 
-        Serial.print(gyroY); Serial.print(F(","));
-        Serial.println(gyroZ);
-        return true;
-    } else {
-        Serial.println(F("  ERROR: Cannot read data!"));
-        return false;
+    Serial.println(F("  Testing read..."));
+    for (int i = 0; i < 3; i++) {
+        if (mpuRead()) {
+            Serial.println(F("  MPU6050 OK!"));
+            Serial.print(F("  Raw Accel: ")); 
+            Serial.print(accelX); Serial.print(F(", ")); 
+            Serial.print(accelY); Serial.print(F(", "));
+            Serial.println(accelZ);
+            Serial.print(F("  Raw Gyro:  ")); 
+            Serial.print(gyroX); Serial.print(F(", ")); 
+            Serial.print(gyroY); Serial.print(F(", "));
+            Serial.println(gyroZ);
+            
+            // Sanity check - accel Z should be around ±4096 when level (1g)
+            if (abs(accelZ) > 2000 && abs(accelZ) < 8000) {
+                Serial.println(F("  Accel Z looks good (gravity detected)"));
+                return true;
+            } else {
+                Serial.println(F("  WARNING: Accel Z unusual, but continuing..."));
+                return true;
+            }
+        }
+        delay(50);
     }
+    
+    Serial.println(F("  ERROR: Cannot read sensor data!"));
+    return false;
 }
 
 bool mpuRead() {
     Wire.beginTransmission(0x68);
     Wire.write(0x3B);  // ACCEL_XOUT_H
-    if (Wire.endTransmission(false) != 0) {
+    uint8_t err = Wire.endTransmission(false);
+    if (err != 0) {
         mpuFails++;
         return false;
     }
     
     uint8_t count = Wire.requestFrom((uint8_t)0x68, (uint8_t)14, (uint8_t)true);
-    if (count != 14) {
+    if (count < 14) {
+        // Try to read what we can and flush
+        while (Wire.available()) Wire.read();
         mpuFails++;
         return false;
     }
     
-    accelX = (Wire.read() << 8) | Wire.read();
-    accelY = (Wire.read() << 8) | Wire.read();
-    accelZ = (Wire.read() << 8) | Wire.read();
-    temperature = (Wire.read() << 8) | Wire.read();
-    gyroX = (Wire.read() << 8) | Wire.read();
-    gyroY = (Wire.read() << 8) | Wire.read();
-    gyroZ = (Wire.read() << 8) | Wire.read();
+    // Read all 14 bytes
+    uint8_t buf[14];
+    for (int i = 0; i < 14; i++) {
+        buf[i] = Wire.read();
+    }
+    
+    accelX = ((int16_t)buf[0] << 8) | buf[1];
+    accelY = ((int16_t)buf[2] << 8) | buf[3];
+    accelZ = ((int16_t)buf[4] << 8) | buf[5];
+    temperature = ((int16_t)buf[6] << 8) | buf[7];
+    gyroX = ((int16_t)buf[8] << 8) | buf[9];
+    gyroY = ((int16_t)buf[10] << 8) | buf[11];
+    gyroZ = ((int16_t)buf[12] << 8) | buf[13];
     
     mpuReads++;
     return true;
@@ -832,10 +897,28 @@ void setup() {
     beepWait(100, 2000); delay(50);
     beepWait(200, 2500);
     
-    // I2C
+    // I2C - Start slow for reliability
     Serial.println(F("Init I2C..."));
     Wire.begin();
-    Wire.setClock(400000);
+    Wire.setClock(100000);  // Start at 100kHz
+    delay(100);
+    
+    // I2C bus recovery - toggle SCL to reset any stuck device
+    Serial.println(F("  I2C bus reset..."));
+    pinMode(A5, OUTPUT);  // SCL
+    for (int i = 0; i < 9; i++) {
+        digitalWrite(A5, LOW);
+        delayMicroseconds(5);
+        digitalWrite(A5, HIGH);
+        delayMicroseconds(5);
+    }
+    pinMode(A5, INPUT);
+    delay(50);
+    
+    // Reinit I2C
+    Wire.begin();
+    Wire.setClock(100000);
+    delay(50);
     
     // MPU6050
     mpuOK = mpuInit();
