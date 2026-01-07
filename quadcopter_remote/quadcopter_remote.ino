@@ -1,42 +1,27 @@
 /**
  * ============================================================================
- *                    QUADCOPTER REMOTE CONTROLLER v3.0
+ *                    QUADCOPTER REMOTE CONTROLLER v3.2
  * ============================================================================
  * 
- * Features:
- *   ✓ NRF24L01 with ACK mode (reliable communication)
- *   ✓ 4-axis joystick input with deadband
- *   ✓ Arm/Disarm safety switch
- *   ✓ Altitude hold toggle
- *   ✓ Calibration and motor test buttons
- *   ✓ Audio and visual feedback
- *   ✓ Connection status monitoring
+ * ESC CALIBRATION PROCEDURE:
+ *   1. Power OFF drone (disconnect battery)
+ *   2. Power ON remote
+ *   3. HOLD D4 (calibrate) button
+ *   4. While holding D4, connect battery to drone
+ *   5. Wait for ESC beeps (high tone = max throttle)
+ *   6. RELEASE D4 button
+ *   7. Wait for ESC beeps (low tone = min throttle)
+ *   8. Done! Drone will restart normally
  * 
- * Hardware:
- *   MCU: Arduino Nano (ATmega328P)
- *   Radio: NRF24L01+ (SPI)
- *   Joysticks: 2x dual-axis potentiometer
- *   Switches: 2x toggle, 2x push button
- * 
- * Libraries Required:
- *   - RF24 (TMRh20): github.com/nRF24/RF24
- * 
- * Pin Configuration:
- *   D2  - ARM Toggle Switch (to GND)
- *   D3  - Altitude Hold Toggle Switch (to GND)
- *   D4  - Calibration Push Button (to GND)
- *   D5  - Motor Test Push Button (to GND)
- *   D6  - Buzzer
- *   D7  - Status LED
- *   D9  - NRF24 CE
- *   D10 - NRF24 CSN
- *   D11 - NRF24 MOSI
- *   D12 - NRF24 MISO
- *   D13 - NRF24 SCK
- *   A0  - Throttle Joystick
- *   A1  - Yaw Joystick
- *   A2  - Pitch Joystick
- *   A3  - Roll Joystick
+ * CONTROLS:
+ *   D2 (toggle) - ARM/DISARM
+ *   D3 (toggle) - Altitude Hold ON/OFF
+ *   D4 (button) - Calibration / Motor Test
+ *   D5 (button) - Motor Test
+ *   A0 - Throttle
+ *   A1 - Yaw
+ *   A2 - Pitch
+ *   A3 - Roll
  * 
  * ============================================================================
  */
@@ -47,23 +32,18 @@
 // ============================================================================
 //                              CONFIGURATION
 // ============================================================================
-
-// RF Channel (0-125) - MUST MATCH FLIGHT CONTROLLER!
-#define RF_CHANNEL          108
-
-// Serial debug (always on for troubleshooting)
+#define RF_CHANNEL          108     // MUST match flight controller!
 #define SERIAL_BAUD         115200
 
 // ============================================================================
 //                            PIN DEFINITIONS
 // ============================================================================
-
 #define PIN_RF_CE           9
 #define PIN_RF_CSN          10
-#define PIN_SW_ARM          2       // Toggle switch - Arm/Disarm
-#define PIN_SW_ALTHOLD      3       // Toggle switch - Altitude Hold
-#define PIN_BTN_CALIB       4       // Push button - Calibration
-#define PIN_BTN_MOTOR       5       // Push button - Motor Test
+#define PIN_SW_ARM          2
+#define PIN_SW_ALTHOLD      3
+#define PIN_BTN_CALIB       4
+#define PIN_BTN_MOTOR       5
 #define PIN_BUZZER          6
 #define PIN_LED             7
 #define PIN_JOY_THROTTLE    A0
@@ -74,33 +54,28 @@
 // ============================================================================
 //                         JOYSTICK CONFIGURATION
 // ============================================================================
-
-#define DEADBAND            30      // ADC deadband (0-1023 scale)
-#define EXPO_FACTOR         0.3f   // Expo curve (0=linear, 1=max curve)
+#define DEADBAND            30
+#define EXPO_FACTOR         0.3f
 
 // ============================================================================
 //                         TIMING CONFIGURATION
 // ============================================================================
-
-#define TX_RATE_MS          20      // 50Hz transmission rate
+#define TX_RATE_MS          20      // 50Hz transmission
 #define INPUT_RATE_MS       10      // 100Hz input sampling
-#define DEBUG_RATE_MS       250     // 4Hz debug output
-#define LED_RATE_MS         500     // LED blink rate
-#define DEBOUNCE_MS         50      // Button debounce
+#define DEBUG_RATE_MS       500     // 2Hz debug output
 
 // ============================================================================
 //                          RF PACKET STRUCTURE
 // ============================================================================
-
 struct __attribute__((packed)) ControlPacket {
-    uint16_t throttle;      // 0-1000
-    int16_t  yaw;           // -500 to +500
-    int16_t  pitch;         // -500 to +500
-    int16_t  roll;          // -500 to +500
-    uint8_t  switches;      // Bit 0:Arm, 1:Calib, 2:MotorTest, 3:AltHold
-    uint8_t  checksum;      // XOR of bytes 0-8
-    uint32_t sequence;      // Packet counter
-    uint8_t  channel;       // RF channel
+    uint16_t throttle;
+    int16_t  yaw;
+    int16_t  pitch;
+    int16_t  roll;
+    uint8_t  switches;
+    uint8_t  checksum;
+    uint32_t sequence;
+    uint8_t  channel;
     uint8_t  reserved;
     
     void calcChecksum() {
@@ -111,7 +86,6 @@ struct __attribute__((packed)) ControlPacket {
     }
 };
 
-// Switch bit definitions
 #define SW_ARM              0
 #define SW_CALIBRATE        1
 #define SW_MOTORTEST        2
@@ -120,19 +94,15 @@ struct __attribute__((packed)) ControlPacket {
 // ============================================================================
 //                           GLOBAL OBJECTS
 // ============================================================================
-
 RF24 radio(PIN_RF_CE, PIN_RF_CSN);
 const uint8_t radioAddress[6] = "QUAD1";
 
 // ============================================================================
 //                          GLOBAL VARIABLES
 // ============================================================================
-
-// Packet
 ControlPacket txPacket;
 uint32_t packetSequence = 0;
 
-// Joystick calibration
 struct {
     int16_t throttleMin = 0;
     int16_t throttleMax = 1023;
@@ -141,33 +111,22 @@ struct {
     int16_t rollCenter = 512;
 } joyCal;
 
-// Raw joystick values
 int16_t rawThrottle = 0, rawYaw = 0, rawPitch = 0, rawRoll = 0;
-
-// Processed values
 int16_t throttle = 0, yaw = 0, pitch = 0, roll = 0;
 
-// Switches
 bool swArm = false, swAltHold = false;
 bool btnCalib = false, btnMotor = false;
 bool prevArm = false, prevCalib = false, prevMotor = false;
 
-// Communication
-bool radioOK = false;
-bool connected = false;
+bool transmitting = false;
 uint32_t packetsSent = 0;
-uint32_t packetsAcked = 0;
-uint32_t packetsFailed = 0;
-uint32_t lastAckTime = 0;
 
-// Timing
 uint32_t timeTX = 0, timeInput = 0, timeDebug = 0, timeLED = 0;
 bool ledState = false;
 
 // ============================================================================
 //                            BUZZER FUNCTIONS
 // ============================================================================
-
 void beep(uint16_t duration, uint16_t freq = 2000) {
     tone(PIN_BUZZER, freq, duration);
 }
@@ -198,37 +157,23 @@ void soundArmOff() {
     beepBlocking(200, 1500);
 }
 
-void soundConnected() {
-    for (int i = 0; i < 3; i++) {
-        beepBlocking(50, 2500);
-        delay(50);
-    }
-}
-
-void soundDisconnected() {
-    beepBlocking(300, 800);
+void soundReady() {
+    beepBlocking(100, 2000); delay(100);
+    beepBlocking(100, 2500); delay(100);
+    beepBlocking(200, 3000);
 }
 
 // ============================================================================
 //                         JOYSTICK FUNCTIONS
 // ============================================================================
-
 int16_t applyDeadbandAndScale(int16_t raw, int16_t center, int16_t outMin, int16_t outMax) {
     int16_t deviation = raw - center;
     
-    // Apply deadband
-    if (abs(deviation) < DEADBAND) {
-        return 0;
-    }
+    if (abs(deviation) < DEADBAND) return 0;
     
-    // Remove deadband from range
-    if (deviation > 0) {
-        deviation -= DEADBAND;
-    } else {
-        deviation += DEADBAND;
-    }
+    if (deviation > 0) deviation -= DEADBAND;
+    else deviation += DEADBAND;
     
-    // Scale to output range
     int16_t maxDev = 512 - DEADBAND;
     int16_t halfRange = (outMax - outMin) / 2;
     return ((int32_t)deviation * halfRange) / maxDev;
@@ -242,7 +187,7 @@ int16_t applyExpo(int16_t value, float expo) {
 }
 
 void readJoysticks() {
-    // Average 4 samples for noise reduction
+    // Average 4 readings for stability
     int32_t sum[4] = {0, 0, 0, 0};
     for (int i = 0; i < 4; i++) {
         sum[0] += analogRead(PIN_JOY_THROTTLE);
@@ -255,11 +200,11 @@ void readJoysticks() {
     rawPitch = sum[2] / 4;
     rawRoll = sum[3] / 4;
     
-    // Process throttle (0-1000, no center)
+    // Scale throttle
     throttle = map(rawThrottle, joyCal.throttleMin, joyCal.throttleMax, 0, 1000);
     throttle = constrain(throttle, 0, 1000);
     
-    // Process centered axes (-500 to +500)
+    // Center-based controls
     yaw = applyDeadbandAndScale(rawYaw, joyCal.yawCenter, -500, 500);
     pitch = applyDeadbandAndScale(rawPitch, joyCal.pitchCenter, -500, 500);
     roll = applyDeadbandAndScale(rawRoll, joyCal.rollCenter, -500, 500);
@@ -270,72 +215,48 @@ void readJoysticks() {
     roll = applyExpo(roll, EXPO_FACTOR);
 }
 
-// Debounced switch states
-bool debouncedArm = false;
-bool debouncedAltHold = false;
-bool debouncedCalib = false;
-bool debouncedMotor = false;
-uint32_t lastSwitchChange = 0;
-
 void readSwitches() {
-    // Save previous states
     prevArm = swArm;
     prevCalib = btnCalib;
     prevMotor = btnMotor;
     
-    // Read raw switches (active LOW with pullup)
+    // Read raw values (active LOW with pullup)
     bool rawArm = !digitalRead(PIN_SW_ARM);
     bool rawAltHold = !digitalRead(PIN_SW_ALTHOLD);
     bool rawCalib = !digitalRead(PIN_BTN_CALIB);
     bool rawMotor = !digitalRead(PIN_BTN_MOTOR);
     
-    // Simple debounce - only update if stable for 50ms
+    // Debounce ARM and ALT HOLD switches
     static bool lastRawArm = false;
     static bool lastRawAltHold = false;
     static uint32_t armStableTime = 0;
     static uint32_t altHoldStableTime = 0;
-    
     uint32_t now = millis();
     
-    // Debounce ARM switch
     if (rawArm != lastRawArm) {
         armStableTime = now;
         lastRawArm = rawArm;
     } else if (now - armStableTime > 50) {
-        debouncedArm = rawArm;
+        swArm = rawArm;
     }
     
-    // Debounce ALT HOLD switch  
     if (rawAltHold != lastRawAltHold) {
         altHoldStableTime = now;
         lastRawAltHold = rawAltHold;
     } else if (now - altHoldStableTime > 50) {
-        debouncedAltHold = rawAltHold;
+        swAltHold = rawAltHold;
     }
     
-    // Buttons don't need debounce as much
-    debouncedCalib = rawCalib;
-    debouncedMotor = rawMotor;
+    // Buttons (no debounce needed - single press detection)
+    btnCalib = rawCalib;
+    btnMotor = rawMotor;
     
-    // Use debounced values
-    swArm = debouncedArm;
-    swAltHold = debouncedAltHold;
-    btnCalib = debouncedCalib;
-    btnMotor = debouncedMotor;
-    
-    // Edge detection with sound
-    if (btnCalib && !prevCalib) {
-        soundButtonPress();
-    }
-    if (btnMotor && !prevMotor) {
-        soundButtonPress();
-    }
+    // Sound feedback
+    if (btnCalib && !prevCalib) soundButtonPress();
+    if (btnMotor && !prevMotor) soundButtonPress();
     if (swArm != prevArm) {
-        if (swArm) {
-            soundArmOn();
-        } else {
-            soundArmOff();
-        }
+        if (swArm) soundArmOn();
+        else soundArmOff();
     }
 }
 
@@ -358,11 +279,11 @@ void calibrateJoystickCenters() {
     joyCal.pitchCenter = sum[1] / 50;
     joyCal.rollCenter = sum[2] / 50;
     
-    Serial.print(F("Calibration done! Centers: Yaw="));
+    Serial.print(F("Centers: Y="));
     Serial.print(joyCal.yawCenter);
-    Serial.print(F(" Pitch="));
+    Serial.print(F(" P="));
     Serial.print(joyCal.pitchCenter);
-    Serial.print(F(" Roll="));
+    Serial.print(F(" R="));
     Serial.println(joyCal.rollCenter);
     
     beepBlocking(100, 2000); delay(50);
@@ -373,38 +294,34 @@ void calibrateJoystickCenters() {
 // ============================================================================
 //                          RADIO FUNCTIONS
 // ============================================================================
-
 bool initRadio() {
-    if (!radio.begin()) {
-        return false;
-    }
+    if (!radio.begin()) return false;
+    
+    radio.flush_tx();
+    radio.flush_rx();
     
     radio.setChannel(RF_CHANNEL);
-    radio.setDataRate(RF24_1MBPS);    // Slower = more reliable
+    radio.setDataRate(RF24_1MBPS);
     radio.setPALevel(RF24_PA_MAX);
     radio.setPayloadSize(16);
-    radio.setAutoAck(false);          // NO ACK mode
+    radio.setAutoAck(false);
     radio.disableDynamicPayloads();
     radio.setCRCLength(RF24_CRC_16);
+    radio.setRetries(0, 0);
     radio.openWritingPipe(radioAddress);
     radio.stopListening();
     
-    Serial.println(F("  Mode: NO_ACK (reliable)"));
-    Serial.print(F("  Channel: ")); Serial.println(RF_CHANNEL);
-    Serial.print(F("  Speed: 1Mbps"));
-    Serial.println();
-    
-    return true;
+    delay(100);
+    return radio.isPVariant();
 }
 
-bool sendPacket() {
+void sendPacket() {
     // Build packet
     txPacket.throttle = throttle;
     txPacket.yaw = yaw;
     txPacket.pitch = pitch;
     txPacket.roll = roll;
     
-    // Build switches byte
     txPacket.switches = 0;
     if (swArm)     txPacket.switches |= (1 << SW_ARM);
     if (btnCalib)  txPacket.switches |= (1 << SW_CALIBRATE);
@@ -416,71 +333,43 @@ bool sendPacket() {
     txPacket.reserved = 0;
     txPacket.calcChecksum();
     
-    // Send (NO_ACK mode - just transmit, don't wait for response)
-    radio.write(&txPacket, sizeof(txPacket), true);  // true = NO_ACK
+    // Send (NO_ACK mode)
+    radio.write(&txPacket, sizeof(txPacket));
     packetsSent++;
     
-    // In NO_ACK mode, we assume connected if we're transmitting
-    // The drone will tell us if it receives packets via its serial output
-    if (!connected && packetsSent > 10) {
-        connected = true;
+    if (!transmitting && packetsSent > 10) {
+        transmitting = true;
         Serial.println(F("\n*** TRANSMITTING ***"));
-        Serial.println(F("Check DRONE serial for received packets"));
-        soundConnected();
     }
-    
-    return true;
 }
 
 // ============================================================================
 //                            LED UPDATE
 // ============================================================================
-
 void updateLED() {
     uint32_t now = millis();
+    uint16_t interval = swArm ? 0 : (transmitting ? 500 : 100);
     
-    if (connected) {
-        if (swArm) {
-            // Solid when armed
-            digitalWrite(PIN_LED, HIGH);
-        } else {
-            // Slow blink when connected
-            if (now - timeLED >= 500) {
-                timeLED = now;
-                ledState = !ledState;
-                digitalWrite(PIN_LED, ledState);
-            }
-        }
-    } else {
-        // Fast blink when disconnected
-        if (now - timeLED >= 100) {
-            timeLED = now;
-            ledState = !ledState;
-            digitalWrite(PIN_LED, ledState);
-        }
+    if (interval == 0) {
+        digitalWrite(PIN_LED, HIGH);
+    } else if (now - timeLED >= interval) {
+        timeLED = now;
+        ledState = !ledState;
+        digitalWrite(PIN_LED, ledState);
     }
 }
 
 // ============================================================================
 //                           DEBUG OUTPUT
 // ============================================================================
-
 void printDebug() {
-    // Packet count
-    Serial.print(F("TX:"));
-    Serial.print(packetsSent);
+    Serial.print(F("TX:")); Serial.print(packetsSent);
     
-    // Joystick values
-    Serial.print(F(" | T:"));
-    Serial.print(throttle);
-    Serial.print(F(" Y:"));
-    Serial.print(yaw);
-    Serial.print(F(" P:"));
-    Serial.print(pitch);
-    Serial.print(F(" R:"));
-    Serial.print(roll);
+    Serial.print(F(" | T:")); Serial.print(throttle);
+    Serial.print(F(" Y:")); Serial.print(yaw);
+    Serial.print(F(" P:")); Serial.print(pitch);
+    Serial.print(F(" R:")); Serial.print(roll);
     
-    // Switches
     Serial.print(F(" | SW:"));
     Serial.print(swArm ? F("A") : F("-"));
     Serial.print(btnCalib ? F("C") : F("-"));
@@ -493,21 +382,17 @@ void printDebug() {
 // ============================================================================
 //                              SETUP
 // ============================================================================
-
 void setup() {
-    // ALWAYS init serial first for debugging
     Serial.begin(SERIAL_BAUD);
     delay(100);
     Serial.println();
-    Serial.println(F("============================="));
-    Serial.println(F("   QUADCOPTER REMOTE v3.0"));
-    Serial.println(F("============================="));
-    Serial.print(F("RF Channel: "));
-    Serial.println(RF_CHANNEL);
+    Serial.println(F("================================"));
+    Serial.println(F("   QUADCOPTER REMOTE v3.2"));
+    Serial.println(F("================================"));
+    Serial.print(F("RF Channel: ")); Serial.println(RF_CHANNEL);
     Serial.println();
     
-    // Initialize pins
-    Serial.println(F("Init pins..."));
+    // Setup pins
     pinMode(PIN_LED, OUTPUT);
     pinMode(PIN_BUZZER, OUTPUT);
     pinMode(PIN_SW_ARM, INPUT_PULLUP);
@@ -516,69 +401,56 @@ void setup() {
     pinMode(PIN_BTN_MOTOR, INPUT_PULLUP);
     
     digitalWrite(PIN_LED, HIGH);
-    Serial.println(F("Pins OK"));
-    
-    // Startup beep
-    Serial.println(F("Buzzer test..."));
     soundStartup();
-    Serial.println(F("Buzzer OK"));
     
-    // Initialize radio
+    // Init Radio
     Serial.println(F("Init NRF24L01..."));
-    Serial.print(F("  CE pin: ")); Serial.println(PIN_RF_CE);
-    Serial.print(F("  CSN pin: ")); Serial.println(PIN_RF_CSN);
+    Serial.println(F("CRITICAL: 10-100uF cap on VCC!"));
     
     if (!initRadio()) {
         Serial.println(F("*** NRF24L01 FAILED! ***"));
-        Serial.println(F("Check wiring:"));
-        Serial.println(F("  VCC  -> 3.3V (NOT 5V!)"));
-        Serial.println(F("  GND  -> GND"));
-        Serial.println(F("  CE   -> D9"));
-        Serial.println(F("  CSN  -> D10"));
-        Serial.println(F("  SCK  -> D13"));
-        Serial.println(F("  MOSI -> D11"));
-        Serial.println(F("  MISO -> D12"));
-        Serial.println(F("Add 10-100uF capacitor on VCC!"));
-        
         while (1) {
             digitalWrite(PIN_LED, !digitalRead(PIN_LED));
             beepBlocking(200, 500);
             delay(300);
         }
     }
+    Serial.println(F("NRF24L01 OK"));
     
-    Serial.println(F("NRF24L01 OK!"));
+    // Show joystick values
+    Serial.println(F("\nJoystick raw values:"));
+    Serial.print(F("  Throttle: ")); Serial.println(analogRead(PIN_JOY_THROTTLE));
+    Serial.print(F("  Yaw:      ")); Serial.println(analogRead(PIN_JOY_YAW));
+    Serial.print(F("  Pitch:    ")); Serial.println(analogRead(PIN_JOY_PITCH));
+    Serial.print(F("  Roll:     ")); Serial.println(analogRead(PIN_JOY_ROLL));
     
-    // Test reading joysticks
-    Serial.println(F("Testing joysticks..."));
-    Serial.print(F("  Throttle (A0): ")); Serial.println(analogRead(PIN_JOY_THROTTLE));
-    Serial.print(F("  Yaw (A1): ")); Serial.println(analogRead(PIN_JOY_YAW));
-    Serial.print(F("  Pitch (A2): ")); Serial.println(analogRead(PIN_JOY_PITCH));
-    Serial.print(F("  Roll (A3): ")); Serial.println(analogRead(PIN_JOY_ROLL));
+    // Show switch states
+    Serial.println(F("\nSwitch states:"));
+    Serial.print(F("  ARM (D2):      ")); Serial.println(!digitalRead(PIN_SW_ARM) ? F("ON") : F("OFF"));
+    Serial.print(F("  ALT HOLD (D3): ")); Serial.println(!digitalRead(PIN_SW_ALTHOLD) ? F("ON") : F("OFF"));
+    Serial.print(F("  CALIB (D4):    ")); Serial.println(!digitalRead(PIN_BTN_CALIB) ? F("PRESSED") : F("released"));
+    Serial.print(F("  MOTOR (D5):    ")); Serial.println(!digitalRead(PIN_BTN_MOTOR) ? F("PRESSED") : F("released"));
     
-    // Test switches
-    Serial.println(F("Testing switches..."));
-    Serial.print(F("  ARM (D2): ")); Serial.println(digitalRead(PIN_SW_ARM) ? "OFF" : "ON");
-    Serial.print(F("  ALT (D3): ")); Serial.println(digitalRead(PIN_SW_ALTHOLD) ? "OFF" : "ON");
-    Serial.print(F("  CAL (D4): ")); Serial.println(digitalRead(PIN_BTN_CALIB) ? "OFF" : "ON");
-    Serial.print(F("  MTR (D5): ")); Serial.println(digitalRead(PIN_BTN_MOTOR) ? "OFF" : "ON");
-    
-    // Calibrate joystick centers
     Serial.println();
     calibrateJoystickCenters();
     
     Serial.println();
-    Serial.println(F("============================="));
-    Serial.println(F("       READY TO FLY!"));
-    Serial.println(F("============================="));
-    Serial.println(F("Transmitting to drone..."));
+    Serial.println(F("================================"));
+    Serial.println(F("        READY TO FLY!"));
+    Serial.println(F("================================"));
+    Serial.println();
+    Serial.println(F("ESC CALIBRATION:"));
+    Serial.println(F("  1. Power OFF drone"));
+    Serial.println(F("  2. Hold D4 button"));
+    Serial.println(F("  3. Power ON drone (keep D4 held)"));
+    Serial.println(F("  4. Wait for high beep"));
+    Serial.println(F("  5. Release D4"));
+    Serial.println(F("  6. Wait for low beep"));
+    Serial.println(F("  7. Done!"));
     Serial.println();
     
-    beepBlocking(100, 2000); delay(100);
-    beepBlocking(100, 2500); delay(100);
-    beepBlocking(200, 3000);
+    soundReady();
     
-    // Initialize timing
     timeTX = timeInput = millis();
     timeDebug = timeLED = millis();
 }
@@ -586,7 +458,6 @@ void setup() {
 // ============================================================================
 //                             MAIN LOOP
 // ============================================================================
-
 void loop() {
     uint32_t now = millis();
     
@@ -606,7 +477,7 @@ void loop() {
     // Update LED
     updateLED();
     
-    // Debug output (4Hz)
+    // Debug output (2Hz)
     if (now - timeDebug >= DEBUG_RATE_MS) {
         timeDebug = now;
         printDebug();
