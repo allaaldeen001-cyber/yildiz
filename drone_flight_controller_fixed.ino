@@ -69,32 +69,30 @@
 // ============================================================================
 #define ESC_MIN             1000
 #define ESC_MAX             2000
-#define ESC_IDLE            1060    // Just above motor spin threshold
+#define ESC_IDLE            1050    // Just above motor spin threshold
 #define ESC_ARM_THR         50
-#define ESC_MAX_THROTTLE    1800    // LIMIT max throttle for safety! (80%)
-#define THROTTLE_EXPO       0.3f    // Softer throttle curve at low end
+#define ESC_MAX_THROTTLE    2000    // FULL THROTTLE (was 1800 - too limited!)
+#define THROTTLE_EXPO       0.2f    // Slight expo for smooth low-end
 
 // ============================================================================
-//                    PID GAINS - SAFE TUNING FOR 2205/2300KV
+//                    PID GAINS - TUNED FOR 2205/2300KV
 // ============================================================================
 // YOUR SETUP: F330 frame, 2205 2300KV motors, 3S battery
-// These motors are VERY powerful - need conservative gains!
-// Start low and increase gradually during test flights.
 
-#define PID_ROLL_KP         0.6f    // START LOW! Increase by 0.1 if sluggish
-#define PID_ROLL_KI         0.001f  // Very low - prevents integral windup
-#define PID_ROLL_KD         0.15f   // Moderate damping
+#define PID_ROLL_KP         0.9f    // Increased for better response
+#define PID_ROLL_KI         0.003f  // Small integral for steady-state
+#define PID_ROLL_KD         0.2f    // Damping
 
-#define PID_PITCH_KP        0.6f    // Same as roll for symmetric response
-#define PID_PITCH_KI        0.001f
-#define PID_PITCH_KD        0.15f
+#define PID_PITCH_KP        0.9f    // Same as roll
+#define PID_PITCH_KI        0.003f
+#define PID_PITCH_KD        0.2f
 
-#define PID_YAW_KP          1.0f    // Yaw is less critical
-#define PID_YAW_KI          0.001f
+#define PID_YAW_KP          1.5f    // Yaw authority
+#define PID_YAW_KI          0.002f
 #define PID_YAW_KD          0.0f
 
-#define PID_I_MAX           20.0f   // Limit integral to prevent windup
-#define PID_OUTPUT_MAX      150.0f  // LIMIT OUTPUT - prevents violent corrections
+#define PID_I_MAX           30.0f   // Integral limit
+#define PID_OUTPUT_MAX      200.0f  // Allow more correction authority
 
 // ============================================================================
 //                    CALIBRATION SETTINGS
@@ -204,7 +202,7 @@ struct PIDState {
 
 float rollPID = 0, pitchPID = 0, yawPID = 0;
 float gainMultiplier = 1.0f;
-float maxAngle = 15.0f;  // Start with small angle limit for safety
+float maxAngle = 25.0f;  // Max tilt angle in degrees
 
 // ============================================================================
 //                         RADIO VARIABLES
@@ -551,13 +549,13 @@ void updateAngles(float dt) {
     float accelRoll = atan2(accelY, accelZ) * 57.2958f;
     float accelPitch = atan2(-accelX, sqrt(accelY*accelY + accelZ*accelZ)) * 57.2958f;
     
-    // Apply axis inversion based on MPU mounting
-    accelRoll *= ROLL_INVERT;
-    accelPitch *= PITCH_INVERT;
-    
-    // Apply level trim
+    // Apply level trim FIRST (before inversion) - offsets were calculated without inversion
     accelRoll -= calibration.rollOffset;
     accelPitch -= calibration.pitchOffset;
+    
+    // THEN apply axis inversion based on MPU mounting
+    accelRoll *= ROLL_INVERT;
+    accelPitch *= PITCH_INVERT;
     
     // Also invert the gyro rates to match
     float pitchRateAdj = pitchRate * PITCH_INVERT;
@@ -748,49 +746,33 @@ void updatePID(float dt) {
 }
 
 // ============================================================================
-//                         UPDATE MOTORS - SAFE VERSION
+//                         UPDATE MOTORS
 // ============================================================================
-// Apply throttle expo curve for smoother control
-float applyThrottleExpo(float throttle, float expo) {
-    float norm = throttle / 1000.0f;  // Normalize to 0-1
-    float curved = norm * (1.0f - expo) + (norm * norm * norm) * expo;
-    return curved * 1000.0f;
-}
-
 void updateMotors() {
     if (flightState != ARMED && flightState != FAILSAFE) {
         motorFL = motorFR = motorRL = motorRR = ESC_MIN;
         motorFL_f = motorFR_f = motorRL_f = motorRR_f = ESC_MIN;
     } else {
-        // Apply expo to throttle for smoother low-end control
-        float throttleExpo = applyThrottleExpo(throttleCmd, THROTTLE_EXPO);
-        
-        // Map throttle with safety limit
-        int16_t baseThr = map(throttleExpo, 0, 1000, ESC_IDLE, ESC_MAX_THROTTLE) - ESC_MIN;
+        // Direct throttle mapping - FULL RANGE
+        int16_t baseThr = map(throttleCmd, 0, 1000, ESC_IDLE, ESC_MAX) - ESC_MIN;
         
         if (flightState == FAILSAFE) {
-            baseThr = baseThr * 0.3f;  // Aggressive reduction in failsafe
+            baseThr = baseThr * 0.5f;
         }
         
-        // Scale PID output based on throttle (less authority at low throttle)
-        float pidScale = constrain(baseThr / 300.0f, 0.3f, 1.0f);
-        int16_t rollMix = (int16_t)(rollPID * pidScale);
-        int16_t pitchMix = (int16_t)(pitchPID * pidScale);
-        int16_t yawMix = (int16_t)(yawPID * pidScale);
+        // Motor mixing for X-quad (no PID scaling - full authority)
+        int16_t fl = baseThr + (int16_t)rollPID + (int16_t)pitchPID + (int16_t)yawPID;
+        int16_t fr = baseThr - (int16_t)rollPID + (int16_t)pitchPID - (int16_t)yawPID;
+        int16_t rl = baseThr + (int16_t)rollPID - (int16_t)pitchPID - (int16_t)yawPID;
+        int16_t rr = baseThr - (int16_t)rollPID - (int16_t)pitchPID + (int16_t)yawPID;
         
-        // Motor mixing for X-quad
-        int16_t fl = baseThr + rollMix + pitchMix + yawMix;
-        int16_t fr = baseThr - rollMix + pitchMix - yawMix;
-        int16_t rl = baseThr + rollMix - pitchMix - yawMix;
-        int16_t rr = baseThr - rollMix - pitchMix + yawMix;
+        // Constrain to full ESC range
+        uint16_t tFL = constrain(fl + ESC_MIN, ESC_MIN, ESC_MAX);
+        uint16_t tFR = constrain(fr + ESC_MIN, ESC_MIN, ESC_MAX);
+        uint16_t tRL = constrain(rl + ESC_MIN, ESC_MIN, ESC_MAX);
+        uint16_t tRR = constrain(rr + ESC_MIN, ESC_MIN, ESC_MAX);
         
-        // Constrain to safe range
-        uint16_t tFL = constrain(fl + ESC_MIN, ESC_MIN, ESC_MAX_THROTTLE);
-        uint16_t tFR = constrain(fr + ESC_MIN, ESC_MIN, ESC_MAX_THROTTLE);
-        uint16_t tRL = constrain(rl + ESC_MIN, ESC_MIN, ESC_MAX_THROTTLE);
-        uint16_t tRR = constrain(rr + ESC_MIN, ESC_MIN, ESC_MAX_THROTTLE);
-        
-        // Smooth motor outputs (prevents sudden changes)
+        // Light smoothing on motor outputs
         motorFL_f = lowPassFilter(motorFL_f, tFL, MOTOR_LPF_ALPHA);
         motorFR_f = lowPassFilter(motorFR_f, tFR, MOTOR_LPF_ALPHA);
         motorRL_f = lowPassFilter(motorRL_f, tRL, MOTOR_LPF_ALPHA);
@@ -841,19 +823,21 @@ void printDebug() {
     // Direction indicator
     printDirectionVisual();
     
-    // Angles (this is the most important for checking inversion!)
-    Serial.print(F(" R:")); Serial.print(roll, 1);
+    // Angles - these should change when you tilt the drone!
+    Serial.print(F("R:")); Serial.print(roll, 1);
     Serial.print(F(" P:")); Serial.print(pitch, 1);
     
-    // PID outputs (should be OPPOSITE sign of angle when leveling)
-    Serial.print(F(" |PID R:")); Serial.print(rollPID, 0);
-    Serial.print(F(" P:")); Serial.print(pitchPID, 0);
+    // Gyro rates - these prove IMU is updating (should change when moving)
+    Serial.print(F(" |Gyro:")); 
+    Serial.print(rollRate, 0); Serial.print(F(","));
+    Serial.print(pitchRate, 0);
     
-    // Throttle %
-    uint8_t thrPercent = map(throttleCmd, 0, 1000, 0, 100);
-    Serial.print(F(" |Thr:")); Serial.print(thrPercent); Serial.print(F("%"));
+    // PID outputs
+    Serial.print(F(" |PID:")); 
+    Serial.print(rollPID, 0); Serial.print(F(","));
+    Serial.print(pitchPID, 0);
     
-    // Motors (all 4)
+    // Motors
     Serial.print(F(" |M:")); Serial.print(motorFL);
     Serial.print(F(",")); Serial.print(motorFR);
     Serial.print(F(",")); Serial.print(motorRL);
@@ -945,9 +929,9 @@ void setup() {
     escRR.writeMicroseconds(ESC_MIN);
     Serial.println(F("OK"));
     
-    Serial.println(F("\n*** SYSTEM READY - SAFE TUNING MODE ***"));
+    Serial.println(F("\n*** SYSTEM READY ***"));
     Serial.println(F("Hardware: F330 / 2205-2300KV / 3S / BLHeli 30A"));
-    Serial.println(F("Throttle LIMITED to 80% for safety!"));
+    Serial.println(F("Full throttle enabled."));
     Serial.println(F("\nDirection indicators:"));
     Serial.println(F("  v = nose DOWN    ^ = nose UP"));
     Serial.println(F("  < = left DOWN    > = right DOWN"));
