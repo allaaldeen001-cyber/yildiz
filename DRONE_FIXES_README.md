@@ -6,37 +6,25 @@ I analyzed the drone flight controller code and found several **critical issues*
 
 ---
 
-## 🔴 CRITICAL ISSUE #1: PWM Timer Conflicts
+## ℹ️ PWM Timer Notes
 
-### Problem
-The original code used these motor pins:
-- `PIN_MOTOR_FL = 3` (Timer 2) ✓
-- `PIN_MOTOR_FR = 5` (Timer 0) ❌ **CONFLICT!**
-- `PIN_MOTOR_RL = 6` (Timer 0) ❌ **CONFLICT!**
-- `PIN_MOTOR_RR = 9` (Timer 1) ✓
+### Original Assessment
+Initially I thought pins 5 and 6 (Timer 0) would conflict with `millis()`. However, the **Servo library uses Timer1 interrupts** internally to generate PWM signals, regardless of which output pins are used.
 
-**Pins 5 and 6 share Timer 0 with Arduino's `millis()` and `delay()` functions!**
+### Conclusion
+The original motor pins (3, 5, 6, 9) are **fine to use** with the Servo library. The real constraint is:
 
-When using the Servo library on Timer 0 pins, it can cause:
-- Timing jitter in PWM signals
-- Motor stuttering/twitching
-- Unpredictable `millis()` behavior
-- Unstable flight
+**DO NOT use pins 10, 11, 12, 13 for motors** - these are SPI pins needed for NRF24L01!
 
-### Fix Applied
-Changed motor pins to avoid Timer 0:
 ```cpp
-// FIXED pin assignments
-#define PIN_MOTOR_FL        3     // Timer 2
-#define PIN_MOTOR_FR        9     // Timer 1
-#define PIN_MOTOR_RL        10    // Timer 1
-#define PIN_MOTOR_RR        11    // Timer 2
-```
+// Motor pins (unchanged from original)
+#define PIN_MOTOR_FL        3     // PWM OK
+#define PIN_MOTOR_FR        5     // PWM OK
+#define PIN_MOTOR_RL        6     // PWM OK
+#define PIN_MOTOR_RR        9     // PWM OK
 
-Also changed RF CSN and Buzzer pins to accommodate the new motor pins:
-```cpp
-#define PIN_RF_CSN          8     // Changed from 10
-#define PIN_BUZZER          2     // Changed from 8
+// SPI pins reserved for NRF24L01
+// D10 = CSN, D11 = MOSI, D12 = MISO, D13 = SCK
 ```
 
 ---
@@ -200,17 +188,20 @@ This shows: Nose DOWN, tilting RIGHT, not spinning
 
 ---
 
-## Hardware Wiring Changes Required
+## Hardware Wiring - NO CHANGES NEEDED!
 
-If using the fixed code, update your wiring:
+The fixed code uses the **same pin assignments** as your original code:
 
-| Component | Old Pin | New Pin |
-|-----------|---------|---------|
-| Motor FR ESC | D5 | **D9** |
-| Motor RL ESC | D6 | **D10** |
-| Motor RR ESC | D9 | **D11** |
-| NRF24 CSN | D10 | **D8** |
-| Buzzer | D8 | **D2** |
+| Component | Pin |
+|-----------|-----|
+| Motor FL ESC | D3 |
+| Motor FR ESC | D5 |
+| Motor RL ESC | D6 |
+| Motor RR ESC | D9 |
+| NRF24 CE | D4 |
+| NRF24 CSN | D10 |
+| LED | D7 |
+| Buzzer | D8 |
 
 ---
 
@@ -233,8 +224,8 @@ After flashing the fixed code:
 
 | Parameter | Original | Fixed | Why |
 |-----------|----------|-------|-----|
-| Motor Pins | 3,5,6,9 | 3,9,10,11 | Avoid Timer 0 |
-| LPF Function | Inverted | Corrected | Was causing lag |
+| Motor Pins | 3,5,6,9 | 3,5,6,9 | No change needed |
+| LPF Function | Inverted | Corrected | **Was causing massive lag!** |
 | COMP_FILTER_ALPHA | 0.996 | 0.98 | Better drift correction |
 | ANGLE_LPF_ALPHA | 0.9 | 0.0 | Remove extra lag |
 | GYRO_DEADBAND | 0.3 | 0.1 | Allow fine corrections |

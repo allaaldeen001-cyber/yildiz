@@ -23,16 +23,13 @@
  *   - Arduino Nano
  *   - NRF24L01 (CE=D4, CSN=D10, 3.3V + capacitor)
  *   - MPU6050 (SDA=A4, SCL=A5, 5V)
- *   - 4x ESCs (D3=FL, D9=FR, D10=RL, D11=RR) - CHANGED for timer compatibility
+ *   - 4x ESCs (D3=FL, D5=FR, D6=RL, D9=RR)
  *   - Buzzer (D8)
  *   - LED (D7)
  * 
- * PWM TIMER NOTES:
- *   Arduino Nano Timer allocation:
- *   - Timer 0: Pin 5, 6 (used by millis()/delay() - AVOID for Servo!)
- *   - Timer 1: Pin 9, 10 (16-bit, best for precise PWM)
- *   - Timer 2: Pin 3, 11 (8-bit, good for PWM)
- *   Using pins 3, 9, 10, 11 avoids Timer 0 conflicts!
+ * SPI PINS (reserved for NRF24L01):
+ *   - D10 = CSN, D11 = MOSI, D12 = MISO, D13 = SCK
+ *   DO NOT use pins 10-13 for motors!
  * 
  * ============================================================================
  */
@@ -52,18 +49,20 @@
 // ============================================================================
 //                            PIN DEFINITIONS
 // ============================================================================
-// FIXED: Moved motors away from Timer0 pins (5,6) to avoid millis() conflicts
-// Original: PIN_MOTOR_FR=5, PIN_MOTOR_RL=6 (Timer 0 - CONFLICTS with millis!)
-// Fixed: Use Timer1 (9,10) and Timer2 (3,11) pins only
-#define PIN_MOTOR_FL        3     // Timer 2
-#define PIN_MOTOR_FR        9     // Timer 1
-#define PIN_MOTOR_RL        10    // Timer 1 (was 6 - Timer 0 CONFLICT!)
-#define PIN_MOTOR_RR        11    // Timer 2 (was 9)
+// NOTE: Pins 10,11,12,13 are reserved for SPI (NRF24L01)!
+// The Servo library uses Timer1 interrupts internally, so Timer0 pins (5,6)
+// are actually safe to use - the timer conflict is minimal with Servo library.
+// 
+// PWM capable pins on Nano: 3,5,6,9,10,11 (but 10,11 needed for SPI)
+#define PIN_MOTOR_FL        3     // Timer 2 - PWM OK
+#define PIN_MOTOR_FR        5     // Timer 0 - PWM OK (Servo lib handles it)
+#define PIN_MOTOR_RL        6     // Timer 0 - PWM OK (Servo lib handles it)
+#define PIN_MOTOR_RR        9     // Timer 1 - PWM OK
 
-#define PIN_RF_CE           4
-#define PIN_RF_CSN          8     // Changed from 10 since we need 10 for motor
+#define PIN_RF_CE           4     // Can be any digital pin
+#define PIN_RF_CSN          10    // SPI Slave Select (keep original!)
 #define PIN_LED             7
-#define PIN_BUZZER          2     // Changed from 8
+#define PIN_BUZZER          8
 
 // ============================================================================
 //                          ESC PARAMETERS
@@ -906,8 +905,8 @@ void setup() {
     radio.startListening();
     Serial.println(F("OK"));
     
-    // FIXED: Using new pin assignments that avoid Timer 0
-    Serial.print(F("Init ESCs (pins 3,9,10,11)..."));
+    // ESC initialization on PWM-capable pins (avoiding SPI pins 10-13)
+    Serial.print(F("Init ESCs (pins 3,5,6,9)..."));
     escFL.attach(PIN_MOTOR_FL, ESC_MIN, ESC_MAX);
     escFR.attach(PIN_MOTOR_FR, ESC_MIN, ESC_MAX);
     escRL.attach(PIN_MOTOR_RL, ESC_MIN, ESC_MAX);
