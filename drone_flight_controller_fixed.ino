@@ -287,25 +287,30 @@ float constrainFloat(float value, float minVal, float maxVal) {
 // ============================================================================
 //                    GET DRONE DIRECTION STRING
 // ============================================================================
+// Standard convention (after axis correction):
+//   Positive pitch (+) = NOSE UP
+//   Negative pitch (-) = NOSE DOWN
+//   Positive roll (+)  = RIGHT wing down
+//   Negative roll (-)  = LEFT wing down
+
 void getDroneDirection(char* dirBuffer, size_t bufSize) {
-    // Start with empty string
     dirBuffer[0] = '\0';
     
-    // Check pitch (nose up/down)
+    // Check pitch (standard: negative = nose down)
     if (pitch < -DIR_THRESHOLD_TILT) {
         strcat(dirBuffer, "NOSE-DOWN ");
     } else if (pitch > DIR_THRESHOLD_TILT) {
         strcat(dirBuffer, "NOSE-UP ");
     }
     
-    // Check roll (tilt left/right)
+    // Check roll (standard: positive = right side down)
     if (roll < -DIR_THRESHOLD_TILT) {
-        strcat(dirBuffer, "LEFT-TILT ");
+        strcat(dirBuffer, "LEFT-DOWN ");
     } else if (roll > DIR_THRESHOLD_TILT) {
-        strcat(dirBuffer, "RIGHT-TILT ");
+        strcat(dirBuffer, "RIGHT-DOWN ");
     }
     
-    // Check yaw rate (spinning)
+    // Check yaw rate
     if (yawRate < -DIR_THRESHOLD_YAW) {
         strcat(dirBuffer, "SPIN-LEFT ");
     } else if (yawRate > DIR_THRESHOLD_YAW) {
@@ -320,25 +325,22 @@ void getDroneDirection(char* dirBuffer, size_t bufSize) {
 
 // Get direction as visual ASCII indicator
 void printDirectionVisual() {
-    // Create simple ASCII representation
-    // Center dot represents the drone, arrows show tilt direction
-    
     Serial.print(F("DIR["));
     
-    // Pitch indicator (front/back)
+    // Pitch indicator (standard convention after correction)
     if (pitch < -DIR_THRESHOLD_TILT) {
-        Serial.print(F("v"));  // Nose down
+        Serial.print(F("v"));  // Nose down (negative pitch)
     } else if (pitch > DIR_THRESHOLD_TILT) {
-        Serial.print(F("^"));  // Nose up
+        Serial.print(F("^"));  // Nose up (positive pitch)
     } else {
         Serial.print(F("-"));  // Level pitch
     }
     
-    // Roll indicator (left/right)
+    // Roll indicator
     if (roll < -DIR_THRESHOLD_TILT) {
-        Serial.print(F("<"));  // Left tilt
+        Serial.print(F("<"));  // Left side down
     } else if (roll > DIR_THRESHOLD_TILT) {
-        Serial.print(F(">"));  // Right tilt
+        Serial.print(F(">"));  // Right side down
     } else {
         Serial.print(F("|"));  // Level roll
     }
@@ -540,27 +542,36 @@ void readIMU() {
 // ============================================================================
 //                    UPDATE ANGLES - FIXED COMPLEMENTARY FILTER
 // ============================================================================
+// AXIS INVERSION FLAGS - adjust based on your MPU6050 mounting orientation
+// Set to -1.0f to invert, 1.0f for normal
+#define PITCH_INVERT    -1.0f   // INVERTED: your MPU has pitch backwards
+#define ROLL_INVERT      1.0f   // Test this - may need inversion too
+
 void updateAngles(float dt) {
     // Calculate angles from accelerometer
     float accelRoll = atan2(accelY, accelZ) * 57.2958f;
     float accelPitch = atan2(-accelX, sqrt(accelY*accelY + accelZ*accelZ)) * 57.2958f;
     
+    // Apply axis inversion based on MPU mounting
+    accelRoll *= ROLL_INVERT;
+    accelPitch *= PITCH_INVERT;
+    
     // Apply level trim
     accelRoll -= calibration.rollOffset;
     accelPitch -= calibration.pitchOffset;
     
-    // FIXED: Better balanced complementary filter
-    // More accelerometer influence (2%) for better drift correction
-    roll = COMP_FILTER_ALPHA * (roll + rollRate * dt) + (1.0f - COMP_FILTER_ALPHA) * accelRoll;
-    pitch = COMP_FILTER_ALPHA * (pitch + pitchRate * dt) + (1.0f - COMP_FILTER_ALPHA) * accelPitch;
+    // Also invert the gyro rates to match
+    float pitchRateAdj = pitchRate * PITCH_INVERT;
+    float rollRateAdj = rollRate * ROLL_INVERT;
+    
+    // Complementary filter with corrected axes
+    roll = COMP_FILTER_ALPHA * (roll + rollRateAdj * dt) + (1.0f - COMP_FILTER_ALPHA) * accelRoll;
+    pitch = COMP_FILTER_ALPHA * (pitch + pitchRateAdj * dt) + (1.0f - COMP_FILTER_ALPHA) * accelPitch;
     
     // Yaw from gyro only
     yaw += yawRate * dt;
     if (yaw > 180) yaw -= 360;
     if (yaw < -180) yaw += 360;
-    
-    // REMOVED: Extra angle smoothing that was causing lag
-    // The complementary filter output is already smooth enough
 }
 
 // ============================================================================
@@ -920,10 +931,12 @@ void setup() {
     
     Serial.println(F("\n*** SYSTEM READY ***"));
     Serial.println(F("Direction indicators:"));
-    Serial.println(F("  ^ = nose up,  v = nose down"));
-    Serial.println(F("  < = left tilt, > = right tilt"));
-    Serial.println(F("  \\ = spin left, / = spin right"));
-    Serial.println(F("  -|o = level and stable"));
+    Serial.println(F("  v = nose DOWN    ^ = nose UP"));
+    Serial.println(F("  < = left DOWN    > = right DOWN"));
+    Serial.println(F("  \\ = spin LEFT    / = spin RIGHT"));
+    Serial.println(F("  -|o = LEVEL"));
+    Serial.println(F("\nPitch axis INVERTED for your MPU mounting."));
+    Serial.println(F("If roll is also wrong, change ROLL_INVERT to -1.0f"));
     Serial.println(F("\nWaiting for radio connection..."));
     Serial.println(F("Keep drone LEVEL before arming!\n"));
     
