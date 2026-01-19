@@ -593,7 +593,7 @@ void setup() {
     
     // Show direction configuration
     Serial.println(F("\nDirection configuration:"));
-    Serial.print(F("  THROTTLE_DIRECTION: ")); Serial.println(THROTTLE_DIRECTION);
+    Serial.print(F("  THROTTLE_INVERT: ")); Serial.println(THROTTLE_INVERT ? "YES" : "NO");
     Serial.print(F("  YAW_DIRECTION: ")); Serial.println(YAW_DIRECTION);
     Serial.print(F("  PITCH_DIRECTION: ")); Serial.println(PITCH_DIRECTION);
     Serial.print(F("  ROLL_DIRECTION: ")); Serial.println(ROLL_DIRECTION);
