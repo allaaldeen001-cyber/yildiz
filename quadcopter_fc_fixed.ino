@@ -97,28 +97,29 @@
 //   5. Add small I gain last if needed for steady-state error
 
 // OUTER LOOP - Angle PID (outputs target rate in deg/sec)
-#define ANGLE_ROLL_KP       2.5f    // Reduced for less aggressive response
-#define ANGLE_ROLL_KI       0.02f   // Small I for steady-state correction
+// REDUCED GAINS to stop shaking
+#define ANGLE_ROLL_KP       1.5f    // Reduced from 2.5 - less aggressive
+#define ANGLE_ROLL_KI       0.0f    // Start with 0 - add later if needed
 #define ANGLE_ROLL_KD       0.0f    // Not needed in cascaded
 
-#define ANGLE_PITCH_KP      2.5f
-#define ANGLE_PITCH_KI      0.02f
+#define ANGLE_PITCH_KP      1.5f    // Reduced from 2.5
+#define ANGLE_PITCH_KI      0.0f
 #define ANGLE_PITCH_KD      0.0f
 
 // INNER LOOP - Rate PID (outputs motor correction)
-// These are the CRITICAL gains for stopping oscillation
-#define RATE_ROLL_KP        0.6f    // Slightly increased for better response
-#define RATE_ROLL_KI        0.01f   // Small I for rate tracking
-#define RATE_ROLL_KD        0.025f  // Increased D for more damping
+// REDUCED GAINS to stop shaking - these are most critical
+#define RATE_ROLL_KP        0.25f   // Reduced from 0.6 - main cause of shaking
+#define RATE_ROLL_KI        0.0f    // Start with 0
+#define RATE_ROLL_KD        0.008f  // Reduced from 0.025 - D amplifies noise
 
-#define RATE_PITCH_KP       0.6f
-#define RATE_PITCH_KI       0.01f
-#define RATE_PITCH_KD       0.025f
+#define RATE_PITCH_KP       0.25f   // Reduced from 0.6
+#define RATE_PITCH_KI       0.0f
+#define RATE_PITCH_KD       0.008f  // Reduced from 0.025
 
 // YAW (single loop is fine for yaw)
-#define PID_YAW_KP          2.0f
-#define PID_YAW_KI          0.05f
-#define PID_YAW_KD          0.01f
+#define PID_YAW_KP          1.0f    // Reduced from 2.0
+#define PID_YAW_KI          0.0f    // Start with 0
+#define PID_YAW_KD          0.0f    // Start with 0
 
 // PID limits
 #define ANGLE_I_MAX         30.0f   // Max angle integral (deg*sec)
@@ -131,20 +132,20 @@
 //                    ANTI-OSCILLATION FILTERING
 // ============================================================================
 // Setpoint filter - smooths stick input to prevent D-term kick
-#define SETPOINT_LPF_ALPHA  0.2f    // Lower = smoother setpoint changes
+#define SETPOINT_LPF_ALPHA  0.15f   // Lower = smoother setpoint changes
 
 // D-term lowpass - removes high-frequency noise that causes vibration
-#define D_TERM_LPF_ALPHA    0.15f   // Lower = more filtering
+#define D_TERM_LPF_ALPHA    0.08f   // Much lower = more filtering to reduce shaking
 
 // Output rate limiter - max change per loop (prevents sudden corrections)
-#define OUTPUT_RATE_LIMIT   20.0f   // Reduced for smoother response
+#define OUTPUT_RATE_LIMIT   15.0f   // Reduced further for smoother response
 
 // ============================================================================
 //                    GENERAL FILTERING
 // ============================================================================
-#define GYRO_LPF_ALPHA      0.4f    // More filtering for stability
-#define ACCEL_LPF_ALPHA     0.2f    // More filtering for smoother angles
-#define MOTOR_LPF_ALPHA     0.3f    // More smoothing on motors
+#define GYRO_LPF_ALPHA      0.3f    // More filtering to reduce noise/shaking
+#define ACCEL_LPF_ALPHA     0.15f   // More filtering for smoother angles
+#define MOTOR_LPF_ALPHA     0.2f    // More smoothing on motors to reduce shaking
 #define RC_LPF_ALPHA        0.5f
 #define POT_LPF_ALPHA       0.1f
 #define RC_DEADBAND         20
@@ -176,10 +177,10 @@
 #define PITCH_SIGN          1.0f    // Positive = nose up increases pitch  
 #define YAW_SIGN            1.0f    // Positive = clockwise increases yaw
 
-// RC stick inversions
-#define RC_ROLL_SIGN        1.0f
+// RC stick inversions - FIXED for correct control direction
+#define RC_ROLL_SIGN        -1.0f   // Flipped: stick left = drone goes left
 #define RC_PITCH_SIGN       1.0f
-#define RC_YAW_SIGN         -1.0f
+#define RC_YAW_SIGN         1.0f    // Flipped: stick right = drone rotates right
 
 // ============================================================================
 //                          RF PACKET
@@ -1157,16 +1158,16 @@ void setup() {
     Serial.println(F("OK"));
     
     Serial.println(F("\n*** SYSTEM READY ***"));
-    Serial.println(F("\nFixes applied:"));
-    Serial.println(F("  - Motor mixing signs corrected"));
-    Serial.println(F("  - PID polarity fixed for proper stabilization"));
-    Serial.println(F("  - Consistent axis handling"));
-    Serial.println(F("  - Improved integral anti-windup"));
-    Serial.println(F("  - Better D-term filtering"));
-    Serial.println(F("\nIf still drifting:"));
-    Serial.println(F("  1. Check ROLL_SIGN and PITCH_SIGN"));
-    Serial.println(F("  2. Verify MPU6050 mounting orientation"));
-    Serial.println(F("  3. Adjust motor trims if needed"));
+    Serial.println(F("\nV2 Fixes applied:"));
+    Serial.println(F("  - RC stick directions corrected"));
+    Serial.println(F("  - PID gains reduced to stop shaking"));
+    Serial.println(F("  - More filtering on gyro and motors"));
+    Serial.println(F("\nIf still shaking:"));
+    Serial.println(F("  1. Reduce RATE_ROLL_KP (currently 0.25)"));
+    Serial.println(F("  2. Reduce RATE_ROLL_KD (currently 0.008)"));
+    Serial.println(F("\nIf too sluggish:"));
+    Serial.println(F("  1. Increase RATE_ROLL_KP slowly"));
+    Serial.println(F("  2. Increase ANGLE_ROLL_KP (currently 1.5)"));
     Serial.println(F("\nWaiting for radio...\n"));
     
     beepPattern(2, 2500, 150, 150);
