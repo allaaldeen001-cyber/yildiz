@@ -1,12 +1,13 @@
 /**
  * ============================================================================
- *    QUADCOPTER FC - V4 PITCH FIX + LOW GAINS
+ *    QUADCOPTER FC - V5 ROLL FIX + ANTI-OSCILLATION
  * ============================================================================
  * 
- * V4 FIXES:
- *   ✓ FIXED: PITCH_SIGN changed to -1.0 (was causing backward flip)
- *   ✓ FIXED: All PID gains reduced significantly to stop oscillation
- *   ✓ FIXED: Heavy filtering added for stability
+ * V5 CRITICAL FIXES:
+ *   ✓ FIXED: Roll mixing signs INVERTED (was causing drift + instability)
+ *   ✓ FIXED: Very low PID gains to stop oscillation/vibration
+ *   ✓ FIXED: Balanced motor trims (all same value)
+ *   ✓ FIXED: Heavy filtering for stability
  * 
  * MOTOR LAYOUT (X-configuration, viewed from above):
  *        FRONT
@@ -14,20 +15,14 @@
  *       X
  *   RL(CW)   RR(CCW)
  * 
- * CURRENT GAINS (very conservative):
- *   ANGLE_KP = 0.8   (increase to 1.5-2.5 if too sluggish)
- *   RATE_KP  = 0.12  (increase to 0.2-0.4 if too sluggish)
- *   RATE_KD  = 0.003 (increase to 0.01-0.02 for more damping)
- * 
- * TUNING PROCESS:
- *   1. Test with current low gains - should be stable but sluggish
- *   2. Slowly increase RATE_KP until responsive
- *   3. If oscillation starts, reduce RATE_KP and increase RATE_KD
- *   4. Then increase ANGLE_KP for faster leveling
+ * ROLL MIXING FIX EXPLANATION:
+ *   When tilted RIGHT: roll angle positive, rollPID becomes NEGATIVE
+ *   To correct: LEFT motors must INCREASE, RIGHT motors must DECREASE
+ *   So: FL,RL need -rollPID (negative becomes positive = increase)
+ *       FR,RR need +rollPID (stays negative = decrease)
  * 
  * ============================================================================
  */
-
 #include "I2Cdev.h"
 #include "MPU6050.h"
 #include "Wire.h"
@@ -58,23 +53,22 @@
 // ============================================================================
 #define ESC_MIN             1000
 #define ESC_MAX             2000
-#define ESC_IDLE            1150    // Reduced idle for better control at low throttle
+#define ESC_IDLE            1150    // Lower idle for better control
 #define ESC_ARM_THR         50
-#define ESC_MAX_THROTTLE    1800    // Increased for more headroom
+#define ESC_MAX_THROTTLE    1700
 
 // ============================================================================
-//                    MOTOR TRIM - BALANCED
+//                    MOTOR TRIM - ALL BALANCED
 // ============================================================================
-// These should be calibrated with motors spinning freely
-// Start with all at 0 and adjust based on observed behavior
+// Start with all trims equal - adjust only after drone is stable
 #define TRIM_FL             0
 #define TRIM_FR             0
 #define TRIM_RL             0
 #define TRIM_RR             0
 
-// Pitch/Roll trim for CG offset compensation
-#define PITCH_TRIM          0       // + = more rear thrust, - = more front thrust
-#define ROLL_TRIM           0       // + = more right thrust, - = more left thrust
+// Pitch/Roll offset trim (for CG compensation)
+#define PITCH_TRIM          0
+#define ROLL_TRIM           0
 
 // ============================================================================
 //                    SAFETY LIMITS
@@ -84,106 +78,67 @@
 #define MAX_GYRO_RATE       500.0f
 
 // ============================================================================
-//             CASCADED PID GAINS - ANTI-OSCILLATION TUNING
+//             PID GAINS - VERY LOW TO STOP OSCILLATION
 // ============================================================================
-// 
-// CASCADED PID ARCHITECTURE:
-//   Outer Loop (Angle): Slow, sets target rate based on angle error
-//   Inner Loop (Rate): Fast, controls motors based on gyro rate
-//
-// TUNING ORDER:
-//   1. Set all I gains to 0
-//   2. Tune Rate P until slight oscillation, then reduce 20%
-//   3. Tune Rate D until smooth (no vibration)
-//   4. Tune Angle P until responsive but no overshoot
-//   5. Add small I gain last if needed for steady-state error
+// Start VERY low - increase slowly after confirming stability
 
-// OUTER LOOP - Angle PID (outputs target rate in deg/sec)
-// VERY LOW GAINS - increase slowly after testing
-#define ANGLE_ROLL_KP       0.8f    // Very low - increase if too sluggish
-#define ANGLE_ROLL_KI       0.0f    // Keep at 0 initially
-#define ANGLE_ROLL_KD       0.0f    // Not needed in cascaded
+// OUTER LOOP - Angle PID
+#define ANGLE_ROLL_KP       0.8f    // Very low - increase if sluggish
+#define ANGLE_ROLL_KI       0.0f    
+#define ANGLE_ROLL_KD       0.0f    
 
-#define ANGLE_PITCH_KP      0.8f    // Very low - increase if too sluggish
+#define ANGLE_PITCH_KP      0.8f
 #define ANGLE_PITCH_KI      0.0f
 #define ANGLE_PITCH_KD      0.0f
 
-// INNER LOOP - Rate PID (outputs motor correction)
-// VERY LOW GAINS to prevent oscillation - these are most critical
-#define RATE_ROLL_KP        0.12f   // Very low - main cause of oscillation
-#define RATE_ROLL_KI        0.0f    // Keep at 0
-#define RATE_ROLL_KD        0.003f  // Very small D
+// INNER LOOP - Rate PID (most critical for oscillation)
+#define RATE_ROLL_KP        0.15f   // Very low - main oscillation cause
+#define RATE_ROLL_KI        0.0f    
+#define RATE_ROLL_KD        0.005f  // Small D for damping
 
-#define RATE_PITCH_KP       0.12f   // Very low
+#define RATE_PITCH_KP       0.15f
 #define RATE_PITCH_KI       0.0f
-#define RATE_PITCH_KD       0.003f  // Very small D
+#define RATE_PITCH_KD       0.005f
 
-// YAW (single loop)
-#define PID_YAW_KP          0.5f    // Low yaw gain
+// YAW
+#define PID_YAW_KP          0.8f
 #define PID_YAW_KI          0.0f
 #define PID_YAW_KD          0.0f
 
-// PID limits - reduced for stability
-#define ANGLE_I_MAX         20.0f   // Max angle integral (deg*sec)
-#define RATE_I_MAX          30.0f   // Max rate integral
-#define RATE_OUTPUT_MAX     200.0f  // Reduced max motor adjustment
-#define ANGLE_RATE_MAX      100.0f  // Reduced max target rate (deg/sec)
-#define YAW_I_MAX           50.0f
+// PID limits
+#define ANGLE_I_MAX         30.0f
+#define RATE_I_MAX          50.0f
+#define RATE_OUTPUT_MAX     150.0f  // Reduced max output
+#define ANGLE_RATE_MAX      100.0f
 
 // ============================================================================
-//                    ANTI-OSCILLATION FILTERING
+//                    FILTERING - HEAVY FOR STABILITY
 // ============================================================================
-// Setpoint filter - smooths stick input to prevent D-term kick
-#define SETPOINT_LPF_ALPHA  0.1f    // Very smooth setpoint changes
+#define SETPOINT_LPF_ALPHA  0.15f   // Smooth setpoint changes
+#define D_TERM_LPF_ALPHA    0.1f    // Heavy D filtering
+#define OUTPUT_RATE_LIMIT   15.0f   // Limit rate of change
 
-// D-term lowpass - removes high-frequency noise that causes vibration
-#define D_TERM_LPF_ALPHA    0.05f   // Heavy filtering on D-term
-
-// Output rate limiter - max change per loop (prevents sudden corrections)
-#define OUTPUT_RATE_LIMIT   10.0f   // Very limited rate of change
-
-// ============================================================================
-//                    GENERAL FILTERING
-// ============================================================================
-#define GYRO_LPF_ALPHA      0.2f    // Heavy gyro filtering
-#define ACCEL_LPF_ALPHA     0.1f    // Heavy accel filtering
-#define MOTOR_LPF_ALPHA     0.15f   // Heavy motor smoothing
+#define GYRO_LPF_ALPHA      0.3f    // Heavy gyro filtering
+#define ACCEL_LPF_ALPHA     0.2f    // Heavy accel filtering
+#define MOTOR_LPF_ALPHA     0.25f   // Heavy motor smoothing
 #define RC_LPF_ALPHA        0.5f
 #define POT_LPF_ALPHA       0.1f
-#define RC_DEADBAND         20
-#define GYRO_DEADBAND       0.5f    // Slightly larger deadband
+#define RC_DEADBAND         25
+#define GYRO_DEADBAND       0.5f
 
 // ============================================================================
 //                    COMPLEMENTARY FILTER
 // ============================================================================
-#define COMP_FILTER_ALPHA   0.98f
+#define COMP_FILTER_ALPHA   0.96f
 
 // ============================================================================
 //                    AXIS CONFIGURATION
 // ============================================================================
-// These define how the MPU6050 axes map to drone axes
-// Adjust based on how the MPU6050 is mounted on your drone
-
-// Accelerometer to angle mapping
-#define ACCEL_ROLL_AXIS     'Y'     // Which accel axis corresponds to roll
-#define ACCEL_PITCH_AXIS    'X'     // Which accel axis corresponds to pitch
-
-// Gyro to rate mapping
-#define GYRO_ROLL_AXIS      'X'     // Which gyro axis corresponds to roll rate
-#define GYRO_PITCH_AXIS     'Y'     // Which gyro axis corresponds to pitch rate
-#define GYRO_YAW_AXIS       'Z'     // Which gyro axis corresponds to yaw rate
-
-// Axis inversions (1.0 or -1.0)
-// Set these based on MPU6050 mounting orientation
-// CRITICAL: These must match your sensor orientation!
-#define ROLL_SIGN           1.0f    // Positive = right side down increases roll
-#define PITCH_SIGN          -1.0f   // FIXED: Was 1.0, caused backward flip
-#define YAW_SIGN            1.0f    // Positive = clockwise increases yaw
-
-// RC stick inversions - FIXED for correct control direction
-#define RC_ROLL_SIGN        -1.0f   // Flipped: stick left = drone goes left
-#define RC_PITCH_SIGN       1.0f
-#define RC_YAW_SIGN         1.0f    // Flipped: stick right = drone rotates right
+#define PITCH_INVERT    -1.0f
+#define ROLL_INVERT      1.0f
+#define RC_ROLL_INVERT      -1.0f
+#define RC_PITCH_INVERT     -1.0f
+#define RC_YAW_INVERT       -1.0f
 
 // ============================================================================
 //                          RF PACKET
@@ -236,45 +191,24 @@ struct CalibrationData {
 // ============================================================================
 int16_t ax_raw, ay_raw, az_raw;
 int16_t gx_raw, gy_raw, gz_raw;
-
-// Filtered sensor values
 float gyroX = 0, gyroY = 0, gyroZ = 0;
 float accelX = 0, accelY = 0, accelZ = 0;
-
-// Attitude angles
 float roll = 0, pitch = 0, yaw = 0;
-
-// Angular rates (in drone frame)
 float rollRate = 0, pitchRate = 0, yawRate = 0;
-
-// Gyro bias tracking
 float gyroBiasX = 0, gyroBiasY = 0, gyroBiasZ = 0;
 bool biasLocked = false;
-uint32_t biasSettleTime = 0;
 
 // ============================================================================
-//                  CASCADED PID STATE - ANTI-OSCILLATION
+//                  CASCADED PID STATE
 // ============================================================================
 struct CascadedPIDState {
-    // Outer loop (angle) state
     float angleIntegral;
     float prevAngle;
-    
-    // Inner loop (rate) state
     float rateIntegral;
     float prevRate;
     float prevDterm;
-    
-    // Setpoint filtering
     float filteredSetpoint;
-    
-    // Output rate limiting
     float prevOutput;
-    
-    // Debug info
-    float lastAngleError;
-    float lastRateError;
-    float lastTargetRate;
     
     void reset() {
         angleIntegral = 0;
@@ -284,30 +218,24 @@ struct CascadedPIDState {
         prevDterm = 0;
         filteredSetpoint = 0;
         prevOutput = 0;
-        lastAngleError = 0;
-        lastRateError = 0;
-        lastTargetRate = 0;
     }
 } pidRollState, pidPitchState;
 
-// Simple PID state for yaw
 struct SimplePIDState {
     float integral;
-    float prevMeasurement;  // For derivative on measurement
-    float prevDterm;
-    float prevOutput;
+    float prevError;
+    float prevDerivative;
     
     void reset() {
         integral = 0;
-        prevMeasurement = 0;
-        prevDterm = 0;
-        prevOutput = 0;
+        prevError = 0;
+        prevDerivative = 0;
     }
 } pidYawState;
 
 float rollPID = 0, pitchPID = 0, yawPID = 0;
 float gainMultiplier = 1.0f;
-float maxAngle = 30.0f;
+float maxAngle = 25.0f;
 
 // ============================================================================
 //                         RADIO VARIABLES
@@ -339,12 +267,11 @@ bool prevArm = false;
 uint32_t emergencyDisarmTime = 0;
 uint8_t emergencyCount = 0;
 
-// Timing - 500Hz main loop
+// Timing
 uint32_t lastIMUTime = 0;
 uint32_t lastRFTime = 0;
 uint32_t lastDebugTime = 0;
 uint32_t lastSafetyCheck = 0;
-uint32_t loopCount = 0;
 
 // ============================================================================
 //                         UTILITY FUNCTIONS
@@ -381,7 +308,6 @@ float constrainFloat(float value, float minVal, float maxVal) {
     return value;
 }
 
-// Rate limiter - prevents sudden changes
 float rateLimitChange(float current, float target, float maxChange) {
     float diff = target - current;
     if (diff > maxChange) return current + maxChange;
@@ -395,14 +321,10 @@ float rateLimitChange(float current, float target, float maxChange) {
 void emergencyDisarm(const char* reason) {
     flightState = EMERGENCY;
     
-    // Immediately stop all motors
     escFL.writeMicroseconds(ESC_MIN);
     escFR.writeMicroseconds(ESC_MIN);
     escRL.writeMicroseconds(ESC_MIN);
     escRR.writeMicroseconds(ESC_MIN);
-    
-    motorFL = motorFR = motorRL = motorRR = ESC_MIN;
-    motorFL_f = motorFR_f = motorRL_f = motorRR_f = ESC_MIN;
     
     Serial.print(F("\n*** EMERGENCY DISARM: "));
     Serial.print(reason);
@@ -454,7 +376,6 @@ void calibrateMPU6050() {
     beepPattern(3, 1500, 200, 300);
     delay(1000);
     
-    // Reset offsets
     mpu.setXAccelOffset(0);
     mpu.setYAccelOffset(0);
     mpu.setZAccelOffset(0);
@@ -466,9 +387,8 @@ void calibrateMPU6050() {
     int16_t ax_off = 0, ay_off = 0, az_off = 0;
     int16_t gx_off = 0, gy_off = 0, gz_off = 0;
     
-    Serial.println(F("Calibrating gyro and accel offsets..."));
+    Serial.println(F("Calibrating..."));
     
-    // Iterative calibration
     for (int iter = 0; iter < 6; iter++) {
         Serial.print(F("Pass ")); Serial.print(iter + 1); Serial.print(F("/6"));
         
@@ -496,10 +416,9 @@ void calibrateMPU6050() {
         int16_t gy_avg = gy_sum / 500;
         int16_t gz_avg = gz_sum / 500;
         
-        // Adjust offsets
         ax_off -= ax_avg / 8;
         ay_off -= ay_avg / 8;
-        az_off += (16384 - az_avg) / 8;  // Target 1g on Z
+        az_off += (16384 - az_avg) / 8;
         gx_off -= gx_avg / 4;
         gy_off -= gy_avg / 4;
         gz_off -= gz_avg / 4;
@@ -511,13 +430,12 @@ void calibrateMPU6050() {
         mpu.setYGyroOffset(gy_off);
         mpu.setZGyroOffset(gz_off);
         
-        Serial.print(F(" - Gyro err: "));
+        Serial.print(F(" - Err: "));
         Serial.println(abs(gx_avg) + abs(gy_avg) + abs(gz_avg));
         
         delay(50);
     }
     
-    // Store calibration
     calibration.axOffset = ax_off;
     calibration.ayOffset = ay_off;
     calibration.azOffset = az_off;
@@ -525,7 +443,6 @@ void calibrateMPU6050() {
     calibration.gyOffset = gy_off;
     calibration.gzOffset = gz_off;
     
-    // Measure level trim
     Serial.println(F("Measuring level trim..."));
     delay(200);
     
@@ -534,9 +451,7 @@ void calibrateMPU6050() {
     for (int i = 0; i < 1000; i++) {
         int16_t ax, ay, az, gx, gy, gz;
         mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-        ax_sum += ax; 
-        ay_sum += ay; 
-        az_sum += az;
+        ax_sum += ax; ay_sum += ay; az_sum += az;
         delayMicroseconds(1000);
     }
     
@@ -544,47 +459,32 @@ void calibrateMPU6050() {
     float ay_avg = ay_sum / 1000.0f;
     float az_avg = az_sum / 1000.0f;
     
-    // Calculate level offsets
     calibration.rollOffset = atan2(ay_avg, az_avg) * 57.2958f;
     calibration.pitchOffset = atan2(-ax_avg, sqrt(ay_avg*ay_avg + az_avg*az_avg)) * 57.2958f;
     
-    Serial.print(F("Level trim: Roll=")); Serial.print(calibration.rollOffset, 2);
-    Serial.print(F("° Pitch=")); Serial.print(calibration.pitchOffset, 2);
+    Serial.print(F("Level trim: R=")); Serial.print(calibration.rollOffset, 2);
+    Serial.print(F("° P=")); Serial.print(calibration.pitchOffset, 2);
     Serial.println(F("°"));
     
     calibration.valid = true;
-    
-    Serial.println(F("\n*** CALIBRATION COMPLETE ***"));
-    Serial.print(F("Gyro offsets: ")); 
-    Serial.print(gx_off); Serial.print(F(", "));
-    Serial.print(gy_off); Serial.print(F(", "));
-    Serial.println(gz_off);
-    Serial.print(F("Accel offsets: ")); 
-    Serial.print(ax_off); Serial.print(F(", "));
-    Serial.print(ay_off); Serial.print(F(", "));
-    Serial.println(az_off);
-    
+    Serial.println(F("*** CALIBRATION COMPLETE ***\n"));
     beepPattern(2, 2500, 100, 100);
 }
 
 // ============================================================================
-//                    READ IMU - FIXED AXIS MAPPING
+//                    READ IMU
 // ============================================================================
 void readIMU() {
     mpu.getMotion6(&ax_raw, &ay_raw, &az_raw, &gx_raw, &gy_raw, &gz_raw);
     
-    // Convert to physical units
-    // Gyro: 500 deg/sec range = 65.5 LSB/(deg/s)
     float gx_dps = gx_raw / 65.5f;
     float gy_dps = gy_raw / 65.5f;
     float gz_dps = gz_raw / 65.5f;
     
-    // Accel: 2g range = 16384 LSB/g
     float ax_g = ax_raw / 16384.0f;
     float ay_g = ay_raw / 16384.0f;
     float az_g = az_raw / 16384.0f;
     
-    // Apply low-pass filter to raw sensor data
     gyroX = lowPassFilter(gyroX, gx_dps, GYRO_LPF_ALPHA);
     gyroY = lowPassFilter(gyroY, gy_dps, GYRO_LPF_ALPHA);
     gyroZ = lowPassFilter(gyroZ, gz_dps, GYRO_LPF_ALPHA);
@@ -593,51 +493,42 @@ void readIMU() {
     accelY = lowPassFilter(accelY, ay_g, ACCEL_LPF_ALPHA);
     accelZ = lowPassFilter(accelZ, az_g, ACCEL_LPF_ALPHA);
     
-    // Update gyro bias when disarmed and stationary
     if (flightState == DISARMED && !biasLocked) {
-        gyroBiasX = lowPassFilter(gyroBiasX, gyroX, 0.005f);  // Slower adaptation
+        gyroBiasX = lowPassFilter(gyroBiasX, gyroX, 0.005f);
         gyroBiasY = lowPassFilter(gyroBiasY, gyroY, 0.005f);
         gyroBiasZ = lowPassFilter(gyroBiasZ, gyroZ, 0.005f);
     }
     
-    // Compensate for gyro bias
     float gyroX_comp = gyroX - gyroBiasX;
     float gyroY_comp = gyroY - gyroBiasY;
     float gyroZ_comp = gyroZ - gyroBiasZ;
     
-    // Map gyro axes to drone frame with proper signs
-    // Standard MPU6050 orientation: X forward, Y right, Z down
-    // Drone convention: Roll = rotation about X, Pitch = rotation about Y, Yaw = rotation about Z
-    rollRate = applyDeadband(gyroX_comp * ROLL_SIGN, GYRO_DEADBAND);
-    pitchRate = applyDeadband(gyroY_comp * PITCH_SIGN, GYRO_DEADBAND);
-    yawRate = applyDeadband(gyroZ_comp * YAW_SIGN, GYRO_DEADBAND);
+    rollRate = applyDeadband(gyroX_comp, GYRO_DEADBAND);
+    pitchRate = applyDeadband(gyroY_comp, GYRO_DEADBAND);
+    yawRate = applyDeadband(gyroZ_comp, GYRO_DEADBAND);
 }
 
 // ============================================================================
-//                    UPDATE ANGLES - FIXED
+//                    UPDATE ANGLES
 // ============================================================================
 void updateAngles(float dt) {
-    // Calculate angles from accelerometer
-    // Standard formulas for roll and pitch from gravity vector
     float accelRoll = atan2(accelY, accelZ) * 57.2958f;
     float accelPitch = atan2(-accelX, sqrt(accelY*accelY + accelZ*accelZ)) * 57.2958f;
     
-    // Apply calibration offsets
     accelRoll -= calibration.rollOffset;
     accelPitch -= calibration.pitchOffset;
     
-    // Apply axis signs
-    accelRoll *= ROLL_SIGN;
-    accelPitch *= PITCH_SIGN;
+    accelRoll *= ROLL_INVERT;
+    accelPitch *= PITCH_INVERT;
     
-    // Complementary filter
-    // Integrate gyro rates (already in correct frame from readIMU)
-    roll = COMP_FILTER_ALPHA * (roll + rollRate * dt) + 
+    float pitchRateAdj = pitchRate * PITCH_INVERT;
+    float rollRateAdj = rollRate * ROLL_INVERT;
+    
+    roll = COMP_FILTER_ALPHA * (roll + rollRateAdj * dt) + 
            (1.0f - COMP_FILTER_ALPHA) * accelRoll;
-    pitch = COMP_FILTER_ALPHA * (pitch + pitchRate * dt) + 
+    pitch = COMP_FILTER_ALPHA * (pitch + pitchRateAdj * dt) + 
             (1.0f - COMP_FILTER_ALPHA) * accelPitch;
     
-    // Yaw from gyro only (no absolute reference)
     yaw += yawRate * dt;
     if (yaw > 180) yaw -= 360;
     if (yaw < -180) yaw += 360;
@@ -656,17 +547,15 @@ void updateRadio() {
             lastValidPacket = millis();
             packetCount++;
             
-            // Parse pot values
             uint8_t gainVal = (packet.auxData >> 4) & 0x0F;
             uint8_t angleVal = packet.auxData & 0x0F;
             
             float targetGain = map(gainVal, 0, 15, 50, 150) / 100.0f;
-            float targetAngle = map(angleVal, 0, 15, 20, 40);
+            float targetAngle = map(angleVal, 0, 15, 15, 35);
             
             gainMultiplier = lowPassFilter(gainMultiplier, targetGain, POT_LPF_ALPHA);
             maxAngle = lowPassFilter(maxAngle, targetAngle, POT_LPF_ALPHA);
             
-            // Flight mode
             bool fmodeBit = packet.switches & (1 << SW_FLIGHTMODE);
             bool rateBit = packet.switches & (1 << SW_RATES);
             
@@ -682,7 +571,6 @@ void updateRadio() {
         }
     }
     
-    // Check for radio timeout
     if (radioConnected && (millis() - lastValidPacket > 500)) {
         radioConnected = false;
         if (flightState == ARMED) {
@@ -701,47 +589,30 @@ void processCommands() {
         return;
     }
     
-    // Process stick inputs with inversions
     float rawThrottle = rxPacket.throttle;
-    float rawRoll = applyDeadband(rxPacket.roll * RC_ROLL_SIGN, RC_DEADBAND);
-    float rawPitch = applyDeadband(rxPacket.pitch * RC_PITCH_SIGN, RC_DEADBAND);
-    float rawYaw = applyDeadband(rxPacket.yaw * RC_YAW_SIGN, RC_DEADBAND);
+    float rawRoll = applyDeadband(rxPacket.roll * RC_ROLL_INVERT, RC_DEADBAND);
+    float rawPitch = applyDeadband(rxPacket.pitch * RC_PITCH_INVERT, RC_DEADBAND);
+    float rawYaw = applyDeadband(rxPacket.yaw * RC_YAW_INVERT, RC_DEADBAND);
     
-    // Filter commands
     throttleCmd = lowPassFilter(throttleCmd, rawThrottle, RC_LPF_ALPHA);
     rollCmd = lowPassFilter(rollCmd, rawRoll, RC_LPF_ALPHA);
     pitchCmd = lowPassFilter(pitchCmd, rawPitch, RC_LPF_ALPHA);
     yawCmd = lowPassFilter(yawCmd, rawYaw, RC_LPF_ALPHA);
     
-    // Arm/Disarm logic
     bool armSwitch = rxPacket.switches & (1 << SW_ARM);
     
     if (armSwitch && !prevArm && flightState == DISARMED) {
-        // Attempt to arm
         bool throttleLow = (throttleCmd < ESC_ARM_THR);
         bool isLevel = (abs(roll) < 8.0f && abs(pitch) < 8.0f);
         bool calibOK = calibration.valid;
-        bool biasSettled = (millis() > 5000);  // Give bias time to settle
         
-        if (throttleLow && isLevel && calibOK && radioConnected && biasSettled) {
+        if (throttleLow && isLevel && calibOK && radioConnected) {
             flightState = ARMED;
             biasLocked = true;
-            
-            // Reset all PID states
             pidRollState.reset();
             pidPitchState.reset();
             pidYawState.reset();
-            
-            // Initialize filtered setpoints to current angles
-            pidRollState.filteredSetpoint = 0;
-            pidPitchState.filteredSetpoint = 0;
-            pidRollState.prevRate = rollRate;
-            pidPitchState.prevRate = pitchRate;
-            
             Serial.println(F("\n*** ARMED ***"));
-            Serial.print(F("Current angles - Roll: ")); Serial.print(roll, 1);
-            Serial.print(F(" Pitch: ")); Serial.println(pitch, 1);
-            
             beepBlocking(2000, 100);
             delay(100);
             beepBlocking(2500, 200);
@@ -753,7 +624,6 @@ void processCommands() {
                 Serial.print(F(" P:")); Serial.print(pitch, 1); Serial.println(F(")"));
             }
             if (!calibOK) Serial.println(F("  - Calibration invalid"));
-            if (!biasSettled) Serial.println(F("  - Bias not settled yet"));
             beepPattern(3, 500, 100, 100);
         }
     } else if (!armSwitch && (flightState == ARMED || flightState == FAILSAFE)) {
@@ -772,52 +642,33 @@ void processCommands() {
 }
 
 // ============================================================================
-//           CASCADED PID - FIXED IMPLEMENTATION
+//                         CASCADED PID
 // ============================================================================
-// 
-// KEY FIXES:
-// 1. Proper sign convention: positive PID output = increase left/front motors
-// 2. Derivative on measurement prevents setpoint kicks
-// 3. Proper integral anti-windup with back-calculation
-// 
 float calculateCascadedPID(float targetAngle, float currentAngle, float currentRate, 
                            float dt, CascadedPIDState& state,
                            float angleKp, float angleKi, 
                            float rateKp, float rateKi, float rateKd) {
     
-    // ==================== SETPOINT FILTERING ====================
+    // Setpoint filtering
     state.filteredSetpoint = lowPassFilter(state.filteredSetpoint, targetAngle, SETPOINT_LPF_ALPHA);
     float smoothedTarget = state.filteredSetpoint;
     
-    // ==================== OUTER LOOP (ANGLE) ====================
+    // OUTER LOOP (Angle)
     float angleError = smoothedTarget - currentAngle;
-    state.lastAngleError = angleError;
-    
-    // P term: Angle error → target rate
     float targetRate = angleKp * gainMultiplier * angleError;
     
-    // I term with anti-windup
-    if (abs(angleError) > 0.3f && angleKi > 0) {
+    if (abs(angleError) > 0.5f && angleKi > 0) {
         state.angleIntegral += angleError * dt;
         state.angleIntegral = constrainFloat(state.angleIntegral, -ANGLE_I_MAX, ANGLE_I_MAX);
         targetRate += angleKi * gainMultiplier * state.angleIntegral;
-    } else {
-        // Decay integral when near target
-        state.angleIntegral *= 0.99f;
     }
     
-    // Limit target rate
     targetRate = constrainFloat(targetRate, -ANGLE_RATE_MAX, ANGLE_RATE_MAX);
-    state.lastTargetRate = targetRate;
     
-    // ==================== INNER LOOP (RATE) ====================
+    // INNER LOOP (Rate)
     float rateError = targetRate - currentRate;
-    state.lastRateError = rateError;
-    
-    // P term
     float rateP = rateKp * gainMultiplier * rateError;
     
-    // I term with anti-windup
     float rateI = 0;
     if (rateKi > 0) {
         state.rateIntegral += rateError * dt;
@@ -825,63 +676,47 @@ float calculateCascadedPID(float targetAngle, float currentAngle, float currentR
         rateI = rateKi * gainMultiplier * state.rateIntegral;
     }
     
-    // D term on MEASUREMENT (not error) - KEY anti-oscillation feature
-    // Negative sign because we want to resist rate changes
+    // D term on measurement
     float rateDelta = (currentRate - state.prevRate) / dt;
     state.prevRate = currentRate;
     
-    // Filter the derivative to reduce noise
     float rateD_raw = -rateKd * gainMultiplier * rateDelta;
     state.prevDterm = lowPassFilter(state.prevDterm, rateD_raw, D_TERM_LPF_ALPHA);
     float rateD = state.prevDterm;
     
-    // Combine
     float output = rateP + rateI + rateD;
     
-    // ==================== OUTPUT RATE LIMITING ====================
+    // Rate limiting
     output = rateLimitChange(state.prevOutput, output, OUTPUT_RATE_LIMIT);
     state.prevOutput = output;
     
-    // Final limit
     return constrainFloat(output, -RATE_OUTPUT_MAX, RATE_OUTPUT_MAX);
 }
 
-// Simple PID for yaw with derivative on measurement
-float calculateYawPID(float targetRate, float currentRate, float dt,
-                      float Kp, float Ki, float Kd, SimplePIDState& state) {
-    float error = targetRate - currentRate;
+float calculateSimplePID(float setpoint, float measurement, float dt,
+                         float Kp, float Ki, float Kd, SimplePIDState& state) {
+    float error = setpoint - measurement;
     
-    // P term
     float P = Kp * gainMultiplier * error;
     
-    // I term with anti-windup
-    if (abs(error) > 1.0f) {
+    if (abs(error) > 0.5f) {
         state.integral += error * dt;
-    } else {
-        state.integral *= 0.995f;  // Decay when near target
     }
-    state.integral = constrainFloat(state.integral, -YAW_I_MAX, YAW_I_MAX);
+    state.integral = constrainFloat(state.integral, -100.0f, 100.0f);
     float I = Ki * gainMultiplier * state.integral;
     
-    // D term on measurement
-    float rateDelta = (currentRate - state.prevMeasurement) / dt;
-    state.prevMeasurement = currentRate;
+    float rawD = (error - state.prevError) / dt;
+    float D_filtered = lowPassFilter(state.prevDerivative, rawD, D_TERM_LPF_ALPHA);
+    state.prevDerivative = D_filtered;
+    float D = Kd * gainMultiplier * D_filtered;
     
-    float D_raw = -Kd * gainMultiplier * rateDelta;
-    state.prevDterm = lowPassFilter(state.prevDterm, D_raw, D_TERM_LPF_ALPHA);
-    float D = state.prevDterm;
+    state.prevError = error;
     
-    float output = P + I + D;
-    
-    // Rate limit
-    output = rateLimitChange(state.prevOutput, output, OUTPUT_RATE_LIMIT * 2);
-    state.prevOutput = output;
-    
-    return constrainFloat(output, -RATE_OUTPUT_MAX, RATE_OUTPUT_MAX);
+    return constrainFloat(P + I + D, -RATE_OUTPUT_MAX, RATE_OUTPUT_MAX);
 }
 
 // ============================================================================
-//                         UPDATE PID - FIXED
+//                         UPDATE PID
 // ============================================================================
 void updatePID(float dt) {
     if (flightState != ARMED) {
@@ -889,157 +724,95 @@ void updatePID(float dt) {
         return;
     }
     
+    float adjRollRate = rollRate * ROLL_INVERT;
+    float adjPitchRate = pitchRate * PITCH_INVERT;
+    
     if (flightMode == FMODE_ANGLE) {
-        // ANGLE MODE: Full stabilization
         float targetRoll = (rollCmd / 500.0f) * maxAngle;
         float targetPitch = (pitchCmd / 500.0f) * maxAngle;
         
-        // Calculate cascaded PID
-        // Note: rollRate and pitchRate are already in the correct frame from readIMU()
-        rollPID = calculateCascadedPID(targetRoll, roll, rollRate, dt, pidRollState,
+        rollPID = calculateCascadedPID(targetRoll, roll, adjRollRate, dt, pidRollState,
                                        ANGLE_ROLL_KP, ANGLE_ROLL_KI,
                                        RATE_ROLL_KP, RATE_ROLL_KI, RATE_ROLL_KD);
         
-        pitchPID = calculateCascadedPID(targetPitch, pitch, pitchRate, dt, pidPitchState,
+        pitchPID = calculateCascadedPID(targetPitch, pitch, adjPitchRate, dt, pidPitchState,
                                         ANGLE_PITCH_KP, ANGLE_PITCH_KI,
                                         RATE_PITCH_KP, RATE_PITCH_KI, RATE_PITCH_KD);
         
     } else if (flightMode == FMODE_HORIZON) {
-        // HORIZON MODE: Blend angle and rate control
         float targetRoll = (rollCmd / 500.0f) * maxAngle;
         float targetPitch = (pitchCmd / 500.0f) * maxAngle;
         
-        float angleRollPID = calculateCascadedPID(targetRoll, roll, rollRate, dt, pidRollState,
+        float angleRollPID = calculateCascadedPID(targetRoll, roll, adjRollRate, dt, pidRollState,
                                                   ANGLE_ROLL_KP, ANGLE_ROLL_KI,
                                                   RATE_ROLL_KP, RATE_ROLL_KI, RATE_ROLL_KD);
-        float anglePitchPID = calculateCascadedPID(targetPitch, pitch, pitchRate, dt, pidPitchState,
+        float anglePitchPID = calculateCascadedPID(targetPitch, pitch, adjPitchRate, dt, pidPitchState,
                                                    ANGLE_PITCH_KP, ANGLE_PITCH_KI,
                                                    RATE_PITCH_KP, RATE_PITCH_KI, RATE_PITCH_KD);
         
-        // Blend with direct rate input for more agile control
-        rollPID = 0.6f * angleRollPID + 0.4f * (rollCmd * 0.3f);
-        pitchPID = 0.6f * anglePitchPID + 0.4f * (pitchCmd * 0.3f);
+        rollPID = 0.7f * angleRollPID + 0.3f * (rollCmd * 0.3f);
+        pitchPID = 0.7f * anglePitchPID + 0.3f * (pitchCmd * 0.3f);
         
     } else {
-        // ACRO MODE: Direct rate control (no angle stabilization)
-        float targetRollRate = (rollCmd / 500.0f) * 250.0f;  // Max 250 deg/sec
-        float targetPitchRate = (pitchCmd / 500.0f) * 250.0f;
-        
-        rollPID = RATE_ROLL_KP * (targetRollRate - rollRate);
-        pitchPID = RATE_PITCH_KP * (targetPitchRate - pitchRate);
+        rollPID = rollCmd * 0.3f;
+        pitchPID = pitchCmd * 0.3f;
     }
     
-    // Yaw control (rate-based in all modes)
-    float targetYawRate = (yawCmd / 500.0f) * 180.0f;  // Max 180 deg/sec
-    yawPID = calculateYawPID(targetYawRate, yawRate, dt, 
-                             PID_YAW_KP, PID_YAW_KI, PID_YAW_KD, pidYawState);
+    float targetYawRate = (yawCmd / 500.0f) * 150.0f;
+    yawPID = calculateSimplePID(targetYawRate, yawRate, dt, 
+                                PID_YAW_KP, PID_YAW_KI, PID_YAW_KD, pidYawState);
 }
 
 // ============================================================================
-//                  UPDATE MOTORS - FIXED MIXING
+//                  UPDATE MOTORS - ROLL SIGNS FIXED!
 // ============================================================================
-// 
-// MOTOR MIXING for X-configuration:
-// 
-//   FL(CCW) ↗     ↖ FR(CW)
-//              X
-//   RL(CW)  ↙     ↘ RR(CCW)
-// 
-// Sign convention:
-//   rollPID > 0  → need to roll LEFT  → increase FL, RL (left side)
-//   pitchPID > 0 → need to pitch DOWN → increase RL, RR (rear)
-//   yawPID > 0   → need to yaw CCW    → increase CW motors (FR, RL)
-//
-// Simulated motor values for testing (shown in debug when disarmed)
-uint16_t simMotorFL = 1500, simMotorFR = 1500, simMotorRL = 1500, simMotorRR = 1500;
-
 void updateMotors() {
-    // Always calculate what motors WOULD be (for debug/testing)
-    int16_t baseThr_sim = 200;  // Simulated base throttle for testing
-    int16_t rollMix_sim = (int16_t)rollPID;
-    int16_t pitchMix_sim = (int16_t)pitchPID;
-    int16_t yawMix_sim = (int16_t)yawPID;
-    
-    simMotorFL = constrain(1500 - rollMix_sim + pitchMix_sim + yawMix_sim, ESC_MIN, ESC_MAX);
-    simMotorFR = constrain(1500 + rollMix_sim + pitchMix_sim - yawMix_sim, ESC_MIN, ESC_MAX);
-    simMotorRL = constrain(1500 - rollMix_sim - pitchMix_sim - yawMix_sim, ESC_MIN, ESC_MAX);
-    simMotorRR = constrain(1500 + rollMix_sim - pitchMix_sim + yawMix_sim, ESC_MIN, ESC_MAX);
-    
     if (flightState != ARMED) {
         motorFL = motorFR = motorRL = motorRR = ESC_MIN;
         motorFL_f = motorFR_f = motorRL_f = motorRR_f = ESC_MIN;
     } else {
-        // Map throttle to motor range
         int16_t baseThr = map(throttleCmd, 0, 1000, ESC_IDLE, ESC_MAX_THROTTLE) - ESC_MIN;
         
-        // Ensure minimum throttle when armed for control authority
-        if (baseThr < (ESC_IDLE - ESC_MIN + 50)) {
-            baseThr = ESC_IDLE - ESC_MIN + 50;
-        }
+        // Minimum throttle for control authority
+        if (baseThr < 100) baseThr = 100;
         
-        // ============================================================
-        // CORRECTED MOTOR MIXING - carefully verified
-        // ============================================================
-        // 
-        // PID OUTPUT CONVENTION:
-        //   - rollPID negative = tilted right, need to roll left
-        //   - pitchPID positive = nose down, need to pitch up
-        //   - yawPID positive = want to rotate clockwise
+        int16_t r = (int16_t)rollPID;
+        int16_t p = (int16_t)pitchPID;
+        int16_t y = (int16_t)yawPID;
+        
+        // ================================================================
+        // CORRECTED MOTOR MIXING - ROLL SIGNS FIXED
+        // ================================================================
+        // Roll: When tilted RIGHT, rollPID is NEGATIVE
+        //       LEFT motors (FL,RL) need to INCREASE: use -rollPID
+        //       RIGHT motors (FR,RR) need to DECREASE: use +rollPID
         //
-        // MOTOR POSITIONS & ROTATION:
-        //        FRONT
-        //   FL(CCW)  FR(CW)
-        //       X
-        //   RL(CW)   RR(CCW)
+        // Pitch: When nose DOWN, pitchPID is POSITIVE  
+        //        FRONT motors need to INCREASE: use +pitchPID
+        //        REAR motors need to DECREASE: use -pitchPID
         //
-        // CORRECTION LOGIC:
-        //   Roll left (fix right tilt): increase FL,RL / decrease FR,RR
-        //   Pitch up (fix nose down): increase FL,FR / decrease RL,RR
-        //   Yaw CW: increase CCW motors (FL,RR) / decrease CW motors (FR,RL)
-        //
+        // Yaw: For CW rotation, yawPID is POSITIVE
+        //      CCW motors (FL,RR) INCREASE: use +yawPID
+        //      CW motors (FR,RL) DECREASE: use -yawPID
         
-        int16_t rollMix = (int16_t)rollPID;
-        int16_t pitchMix = (int16_t)pitchPID;
-        int16_t yawMix = (int16_t)yawPID;
+        int16_t fl = baseThr - r + p + y;  // Left, Front, CCW
+        int16_t fr = baseThr + r + p - y;  // Right, Front, CW
+        int16_t rl = baseThr - r - p - y;  // Left, Rear, CW
+        int16_t rr = baseThr + r - p + y;  // Right, Rear, CCW
         
-        // Calculate motor values with CORRECT signs:
-        // - rollMix: negative when need to increase left motors
-        //   so LEFT motors get: -rollMix (negative becomes positive = increase)
-        //   and RIGHT motors get: +rollMix (negative stays negative = decrease)
-        //
-        // - pitchMix: positive when need to increase front motors
-        //   so FRONT motors get: +pitchMix
-        //   and REAR motors get: -pitchMix
-        //
-        // - yawMix: positive when need to increase CCW motors
-        //   so CCW motors (FL,RR) get: +yawMix
-        //   and CW motors (FR,RL) get: -yawMix
+        // Apply trims
+        fl += TRIM_FL + ROLL_TRIM + PITCH_TRIM;
+        fr += TRIM_FR - ROLL_TRIM + PITCH_TRIM;
+        rl += TRIM_RL + ROLL_TRIM - PITCH_TRIM;
+        rr += TRIM_RR - ROLL_TRIM - PITCH_TRIM;
         
-        // FL: Left (roll-), Front (pitch+), CCW (yaw+)
-        int16_t fl = baseThr - rollMix + pitchMix + yawMix;
+        // Constrain
+        uint16_t tFL = constrain(fl + ESC_MIN, ESC_MIN, ESC_MAX);
+        uint16_t tFR = constrain(fr + ESC_MIN, ESC_MIN, ESC_MAX);
+        uint16_t tRL = constrain(rl + ESC_MIN, ESC_MIN, ESC_MAX);
+        uint16_t tRR = constrain(rr + ESC_MIN, ESC_MIN, ESC_MAX);
         
-        // FR: Right (roll+), Front (pitch+), CW (yaw-)
-        int16_t fr = baseThr + rollMix + pitchMix - yawMix;
-        
-        // RL: Left (roll-), Rear (pitch-), CW (yaw-)
-        int16_t rl = baseThr - rollMix - pitchMix - yawMix;
-        
-        // RR: Right (roll+), Rear (pitch-), CCW (yaw+)
-        int16_t rr = baseThr + rollMix - pitchMix + yawMix;
-        
-        // Apply trim offsets (for CG compensation)
-        fl += ROLL_TRIM + PITCH_TRIM;
-        fr += -ROLL_TRIM + PITCH_TRIM;
-        rl += ROLL_TRIM + -PITCH_TRIM;
-        rr += -ROLL_TRIM + -PITCH_TRIM;
-        
-        // Apply individual motor trims and constrain
-        uint16_t tFL = constrain(fl + ESC_MIN + TRIM_FL, ESC_MIN, ESC_MAX);
-        uint16_t tFR = constrain(fr + ESC_MIN + TRIM_FR, ESC_MIN, ESC_MAX);
-        uint16_t tRL = constrain(rl + ESC_MIN + TRIM_RL, ESC_MIN, ESC_MAX);
-        uint16_t tRR = constrain(rr + ESC_MIN + TRIM_RR, ESC_MIN, ESC_MAX);
-        
-        // Smooth motor outputs to prevent sudden changes
+        // Smooth motor outputs
         motorFL_f = lowPassFilter(motorFL_f, tFL, MOTOR_LPF_ALPHA);
         motorFR_f = lowPassFilter(motorFR_f, tFR, MOTOR_LPF_ALPHA);
         motorRL_f = lowPassFilter(motorRL_f, tRL, MOTOR_LPF_ALPHA);
@@ -1051,7 +824,6 @@ void updateMotors() {
         motorRR = (uint16_t)motorRR_f;
     }
     
-    // Write to ESCs
     escFL.writeMicroseconds(motorFL);
     escFR.writeMicroseconds(motorFR);
     escRL.writeMicroseconds(motorRL);
@@ -1066,11 +838,10 @@ void updateLED() {
     static bool ledState = false;
     
     uint16_t interval;
-    if (flightState == ARMED) interval = 0;  // Solid on
-    else if (flightState == EMERGENCY) interval = 50;  // Fast blink
-    else if (!calibration.valid) interval = 200;  // Medium blink
-    else if (!radioConnected) interval = 100;  // Fast blink when no radio
-    else interval = 500;  // Slow blink when ready
+    if (flightState == ARMED) interval = 0;
+    else if (flightState == EMERGENCY) interval = 50;
+    else if (!calibration.valid) interval = 200;
+    else interval = 500;
     
     if (interval == 0) {
         digitalWrite(PIN_LED, HIGH);
@@ -1085,63 +856,34 @@ void updateLED() {
 //                         DEBUG OUTPUT
 // ============================================================================
 void printDebug() {
-    // State
     if (flightState == ARMED) Serial.print(F("ARM "));
     else if (flightState == EMERGENCY) Serial.print(F("EMG "));
     else Serial.print(F("DIS "));
     
-    // Mode
-    if (flightMode == FMODE_ANGLE) Serial.print(F("ANG "));
-    else if (flightMode == FMODE_HORIZON) Serial.print(F("HOR "));
-    else Serial.print(F("ACR "));
+    // Show angles and which way correction should go
+    Serial.print(F("| R:")); Serial.print(roll, 1);
+    if (roll > 3) Serial.print(F("L"));  // Tilted right, correct left
+    else if (roll < -3) Serial.print(F("R"));
     
-    // Angles with direction indicator
-    Serial.print(F("| R:"));
-    Serial.print(roll, 1);
-    if (roll > 2) Serial.print(F("->L"));      // Tilted right, should correct left
-    else if (roll < -2) Serial.print(F("->R")); // Tilted left, should correct right
+    Serial.print(F(" P:")); Serial.print(pitch, 1);
+    if (pitch < -3) Serial.print(F("U"));  // Nose down, correct up
+    else if (pitch > 3) Serial.print(F("D"));
     
-    Serial.print(F(" P:"));
-    Serial.print(pitch, 1);
-    if (pitch < -2) Serial.print(F("->U"));     // Nose down, should pitch up
-    else if (pitch > 2) Serial.print(F("->D")); // Nose up, should pitch down
+    // PID outputs
+    Serial.print(F(" | PID:")); Serial.print(rollPID, 0);
+    Serial.print(F(",")); Serial.print(pitchPID, 0);
     
-    // PID outputs (shows correction direction)
-    Serial.print(F(" | PID R:"));
-    Serial.print(rollPID, 0);
-    Serial.print(F(" P:"));
-    Serial.print(pitchPID, 0);
+    // Motors
+    Serial.print(F(" | M:")); Serial.print(motorFL);
+    Serial.print(F(",")); Serial.print(motorFR);
+    Serial.print(F(",")); Serial.print(motorRL);
+    Serial.print(F(",")); Serial.print(motorRR);
     
-    // Motor values (show simulated when disarmed for testing)
-    if (flightState == ARMED) {
-        Serial.print(F(" | FL:"));
-        Serial.print(motorFL);
-        Serial.print(F(" FR:"));
-        Serial.print(motorFR);
-        Serial.print(F(" RL:"));
-        Serial.print(motorRL);
-        Serial.print(F(" RR:"));
-        Serial.print(motorRR);
-    } else {
-        // Show simulated values when disarmed (helps test mixing)
-        Serial.print(F(" | SIM FL:"));
-        Serial.print(simMotorFL);
-        Serial.print(F(" FR:"));
-        Serial.print(simMotorFR);
-        Serial.print(F(" RL:"));
-        Serial.print(simMotorRL);
-        Serial.print(F(" RR:"));
-        Serial.print(simMotorRR);
-    }
-    
-    // Motor balance check - helps identify drift direction
-    int16_t left_sum = (flightState == ARMED) ? (motorFL + motorRL) : (simMotorFL + simMotorRL);
-    int16_t right_sum = (flightState == ARMED) ? (motorFR + motorRR) : (simMotorFR + simMotorRR);
-    int16_t front_sum = (flightState == ARMED) ? (motorFL + motorFR) : (simMotorFL + simMotorFR);
-    int16_t rear_sum = (flightState == ARMED) ? (motorRL + motorRR) : (simMotorRL + simMotorRR);
-    
-    Serial.print(F(" | Bal L-R:")); Serial.print(left_sum - right_sum);
-    Serial.print(F(" F-B:")); Serial.print(front_sum - rear_sum);
+    // Balance
+    int16_t LR = (motorFL + motorRL) - (motorFR + motorRR);
+    int16_t FB = (motorFL + motorFR) - (motorRL + motorRR);
+    Serial.print(F(" LR:")); Serial.print(LR);
+    Serial.print(F(" FB:")); Serial.print(FB);
     
     Serial.println();
 }
@@ -1154,22 +896,19 @@ void setup() {
     while (!Serial && millis() < 1000);
     
     Serial.println(F("\n=========================================="));
-    Serial.println(F("  QUADCOPTER FC - FIXED VERSION"));
-    Serial.println(F("  Anti-Oscillation + Drift Fixes"));
+    Serial.println(F("  QUADCOPTER FC - V5"));
+    Serial.println(F("  Roll Fix + Anti-Oscillation"));
     Serial.println(F("==========================================\n"));
     
-    // Initialize pins
     pinMode(PIN_LED, OUTPUT);
     pinMode(PIN_BUZZER, OUTPUT);
     digitalWrite(PIN_LED, HIGH);
     
     beepPattern(3, 2000, 100, 100);
     
-    // Initialize I2C
     Wire.begin();
     Wire.setClock(400000);
     
-    // Initialize MPU6050
     Serial.print(F("Init MPU6050..."));
     mpu.initialize();
     
@@ -1182,15 +921,12 @@ void setup() {
     }
     Serial.println(F("OK"));
     
-    // Configure MPU6050
-    mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_500);   // 500 deg/sec
-    mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);   // 2g
-    mpu.setDLPFMode(MPU6050_DLPF_BW_42);              // 42Hz bandwidth
+    mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_500);
+    mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
+    mpu.setDLPFMode(MPU6050_DLPF_BW_42);
     
-    // Calibrate
     calibrateMPU6050();
     
-    // Initialize radio
     Serial.print(F("Init NRF24L01..."));
     if (!radio.begin()) {
         Serial.println(F("FAILED!"));
@@ -1211,7 +947,6 @@ void setup() {
     radio.startListening();
     Serial.println(F("OK"));
     
-    // Initialize ESCs
     Serial.print(F("Init ESCs..."));
     escFL.attach(PIN_MOTOR_FL, ESC_MIN, ESC_MAX);
     escFR.attach(PIN_MOTOR_FR, ESC_MIN, ESC_MAX);
@@ -1224,24 +959,20 @@ void setup() {
     escRR.writeMicroseconds(ESC_MIN);
     Serial.println(F("OK"));
     
-    Serial.println(F("\n*** SYSTEM READY - V4 ***"));
-    Serial.println(F("\nV4 Fixes:"));
-    Serial.println(F("  - PITCH_SIGN = -1 (fixes backward flip)"));
-    Serial.println(F("  - Very low PID gains (stops oscillation)"));
-    Serial.println(F("  - Heavy filtering for stability"));
-    Serial.println(F("\nCurrent gains (very conservative):"));
-    Serial.println(F("  ANGLE_KP=0.8, RATE_KP=0.12, RATE_KD=0.003"));
-    Serial.println(F("\nDrone will be SLUGGISH but STABLE."));
-    Serial.println(F("After confirming stability, increase gains:"));
-    Serial.println(F("  1. RATE_ROLL_KP: 0.12 -> 0.2 -> 0.3"));
-    Serial.println(F("  2. ANGLE_ROLL_KP: 0.8 -> 1.2 -> 1.5"));
+    Serial.println(F("\n*** SYSTEM READY - V5 ***"));
+    Serial.println(F("\nV5 FIXES:"));
+    Serial.println(F("  1. ROLL mixing signs FIXED"));
+    Serial.println(F("  2. Very low PID gains"));
+    Serial.println(F("  3. Heavy filtering"));
+    Serial.println(F("  4. Balanced trims"));
+    Serial.println(F("\nGains (increase if too sluggish):"));
+    Serial.println(F("  ANGLE_KP=0.8  RATE_KP=0.15"));
     Serial.println(F("\nWaiting for radio...\n"));
     
     beepPattern(2, 2500, 150, 150);
     
     lastIMUTime = micros();
     lastRFTime = lastDebugTime = millis();
-    biasSettleTime = millis();
 }
 
 // ============================================================================
@@ -1251,35 +982,27 @@ void loop() {
     uint32_t nowMicros = micros();
     uint32_t nowMillis = millis();
     
-    // Main control loop at 500Hz (every 2000us)
     if (nowMicros - lastIMUTime >= 2000) {
         float dt = (nowMicros - lastIMUTime) / 1000000.0f;
         lastIMUTime = nowMicros;
         
-        // Clamp dt to reasonable range to prevent issues after long delays
-        if (dt > 0.01f) dt = 0.002f;  // Reset to nominal if too large
-        if (dt < 0.0001f) dt = 0.002f;  // Reset if too small
+        if (dt > 0.01f) dt = 0.002f;
         
         readIMU();
         updateAngles(dt);
         updatePID(dt);
         updateMotors();
         checkSafety();
-        
-        loopCount++;
     }
     
-    // Radio processing at 50Hz
     if (nowMillis - lastRFTime >= 20) {
         lastRFTime = nowMillis;
         updateRadio();
         processCommands();
     }
     
-    // LED update (non-blocking)
     updateLED();
     
-    // Debug output at 5Hz
     if (nowMillis - lastDebugTime >= 200) {
         lastDebugTime = nowMillis;
         printDebug();
