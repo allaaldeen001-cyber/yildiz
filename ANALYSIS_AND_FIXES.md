@@ -201,3 +201,57 @@ Shaking is caused by PID overcorrection. The control loop corrects too aggressiv
 3. Reduced `ANGLE_KP` from 2.5 to 1.5
 4. Set all I gains to 0 (add later if needed)
 5. Increased filtering on gyro, D-term, and motors
+
+---
+
+## V3 Fixes (Motor Mixing - RR Drift)
+
+### Issue: Drone drifts toward RR (rear-right)
+
+The motor mixing signs were **ALL WRONG** for all three axes.
+
+### Root Cause Analysis
+
+When the PID calculates a correction:
+- **Tilted RIGHT** (positive roll) → error = 0 - positive = **negative** → rollPID = **negative**
+
+With the OLD mixing:
+```cpp
+fl = baseThr + rollMix  // + negative = DECREASE FL
+```
+
+But FL is on the **LEFT** side and should **INCREASE** to correct a right tilt!
+
+### The Fix
+
+**OLD (WRONG) mixing:**
+```cpp
+fl = baseThr + rollMix - pitchMix - yawMix
+fr = baseThr - rollMix - pitchMix + yawMix
+rl = baseThr + rollMix + pitchMix + yawMix
+rr = baseThr - rollMix + pitchMix - yawMix
+```
+
+**NEW (CORRECT) mixing:**
+```cpp
+fl = baseThr - rollMix + pitchMix + yawMix  // Left, Front, CCW
+fr = baseThr + rollMix + pitchMix - yawMix  // Right, Front, CW
+rl = baseThr - rollMix - pitchMix - yawMix  // Left, Rear, CW
+rr = baseThr + rollMix - pitchMix + yawMix  // Right, Rear, CCW
+```
+
+### Verification Logic
+
+| Condition | PID Output | Correct Response |
+|-----------|------------|------------------|
+| Tilt RIGHT | rollPID negative | FL,RL increase (left side up) |
+| Nose DOWN | pitchPID positive | FL,FR increase (front up) |
+| Yaw CW command | yawPID positive | FL,RR increase (CCW motors) |
+
+### Testing Feature Added
+
+When **disarmed**, the serial monitor now shows **simulated motor values**. 
+Manually tilt the drone and verify:
+- Tilt RIGHT → FL, RL values should increase
+- Tilt FORWARD → RL, RR values should increase
+- If opposite, check `ROLL_SIGN` and `PITCH_SIGN` constants
