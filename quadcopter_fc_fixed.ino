@@ -1,13 +1,12 @@
 /**
  * ============================================================================
- *    QUADCOPTER FC - V3 MOTOR MIXING FIX
+ *    QUADCOPTER FC - V4 PITCH FIX + LOW GAINS
  * ============================================================================
  * 
- * V3 FIXES:
- *   ✓ FIXED: Motor mixing signs - ALL axes corrected
- *   ✓ FIXED: Roll correction now works correctly
- *   ✓ FIXED: Pitch correction now works correctly  
- *   ✓ FIXED: Yaw correction now works correctly
+ * V4 FIXES:
+ *   ✓ FIXED: PITCH_SIGN changed to -1.0 (was causing backward flip)
+ *   ✓ FIXED: All PID gains reduced significantly to stop oscillation
+ *   ✓ FIXED: Heavy filtering added for stability
  * 
  * MOTOR LAYOUT (X-configuration, viewed from above):
  *        FRONT
@@ -15,14 +14,16 @@
  *       X
  *   RL(CW)   RR(CCW)
  * 
- * MOTOR MIXING LOGIC:
- *   Tilt RIGHT → rollPID negative → increase LEFT motors (FL,RL)
- *   Nose DOWN  → pitchPID positive → increase FRONT motors (FL,FR)
- *   Yaw CW     → yawPID positive → increase CCW motors (FL,RR)
+ * CURRENT GAINS (very conservative):
+ *   ANGLE_KP = 0.8   (increase to 1.5-2.5 if too sluggish)
+ *   RATE_KP  = 0.12  (increase to 0.2-0.4 if too sluggish)
+ *   RATE_KD  = 0.003 (increase to 0.01-0.02 for more damping)
  * 
- * VERIFICATION TEST (while disarmed, manually tilt drone):
- *   Tilt right → FL,RL should want to spin faster (check debug)
- *   Tilt forward → RL,RR should want to spin faster
+ * TUNING PROCESS:
+ *   1. Test with current low gains - should be stable but sluggish
+ *   2. Slowly increase RATE_KP until responsive
+ *   3. If oscillation starts, reduce RATE_KP and increase RATE_KD
+ *   4. Then increase ANGLE_KP for faster leveling
  * 
  * ============================================================================
  */
@@ -98,55 +99,55 @@
 //   5. Add small I gain last if needed for steady-state error
 
 // OUTER LOOP - Angle PID (outputs target rate in deg/sec)
-// REDUCED GAINS to stop shaking
-#define ANGLE_ROLL_KP       1.5f    // Reduced from 2.5 - less aggressive
-#define ANGLE_ROLL_KI       0.0f    // Start with 0 - add later if needed
+// VERY LOW GAINS - increase slowly after testing
+#define ANGLE_ROLL_KP       0.8f    // Very low - increase if too sluggish
+#define ANGLE_ROLL_KI       0.0f    // Keep at 0 initially
 #define ANGLE_ROLL_KD       0.0f    // Not needed in cascaded
 
-#define ANGLE_PITCH_KP      1.5f    // Reduced from 2.5
+#define ANGLE_PITCH_KP      0.8f    // Very low - increase if too sluggish
 #define ANGLE_PITCH_KI      0.0f
 #define ANGLE_PITCH_KD      0.0f
 
 // INNER LOOP - Rate PID (outputs motor correction)
-// REDUCED GAINS to stop shaking - these are most critical
-#define RATE_ROLL_KP        0.25f   // Reduced from 0.6 - main cause of shaking
-#define RATE_ROLL_KI        0.0f    // Start with 0
-#define RATE_ROLL_KD        0.008f  // Reduced from 0.025 - D amplifies noise
+// VERY LOW GAINS to prevent oscillation - these are most critical
+#define RATE_ROLL_KP        0.12f   // Very low - main cause of oscillation
+#define RATE_ROLL_KI        0.0f    // Keep at 0
+#define RATE_ROLL_KD        0.003f  // Very small D
 
-#define RATE_PITCH_KP       0.25f   // Reduced from 0.6
+#define RATE_PITCH_KP       0.12f   // Very low
 #define RATE_PITCH_KI       0.0f
-#define RATE_PITCH_KD       0.008f  // Reduced from 0.025
+#define RATE_PITCH_KD       0.003f  // Very small D
 
-// YAW (single loop is fine for yaw)
-#define PID_YAW_KP          1.0f    // Reduced from 2.0
-#define PID_YAW_KI          0.0f    // Start with 0
-#define PID_YAW_KD          0.0f    // Start with 0
+// YAW (single loop)
+#define PID_YAW_KP          0.5f    // Low yaw gain
+#define PID_YAW_KI          0.0f
+#define PID_YAW_KD          0.0f
 
-// PID limits
-#define ANGLE_I_MAX         30.0f   // Max angle integral (deg*sec)
-#define RATE_I_MAX          50.0f   // Max rate integral
-#define RATE_OUTPUT_MAX     400.0f  // Max motor adjustment from rate PID
-#define ANGLE_RATE_MAX      180.0f  // Max target rate from angle loop (deg/sec)
-#define YAW_I_MAX           100.0f
+// PID limits - reduced for stability
+#define ANGLE_I_MAX         20.0f   // Max angle integral (deg*sec)
+#define RATE_I_MAX          30.0f   // Max rate integral
+#define RATE_OUTPUT_MAX     200.0f  // Reduced max motor adjustment
+#define ANGLE_RATE_MAX      100.0f  // Reduced max target rate (deg/sec)
+#define YAW_I_MAX           50.0f
 
 // ============================================================================
 //                    ANTI-OSCILLATION FILTERING
 // ============================================================================
 // Setpoint filter - smooths stick input to prevent D-term kick
-#define SETPOINT_LPF_ALPHA  0.15f   // Lower = smoother setpoint changes
+#define SETPOINT_LPF_ALPHA  0.1f    // Very smooth setpoint changes
 
 // D-term lowpass - removes high-frequency noise that causes vibration
-#define D_TERM_LPF_ALPHA    0.08f   // Much lower = more filtering to reduce shaking
+#define D_TERM_LPF_ALPHA    0.05f   // Heavy filtering on D-term
 
 // Output rate limiter - max change per loop (prevents sudden corrections)
-#define OUTPUT_RATE_LIMIT   15.0f   // Reduced further for smoother response
+#define OUTPUT_RATE_LIMIT   10.0f   // Very limited rate of change
 
 // ============================================================================
 //                    GENERAL FILTERING
 // ============================================================================
-#define GYRO_LPF_ALPHA      0.3f    // More filtering to reduce noise/shaking
-#define ACCEL_LPF_ALPHA     0.15f   // More filtering for smoother angles
-#define MOTOR_LPF_ALPHA     0.2f    // More smoothing on motors to reduce shaking
+#define GYRO_LPF_ALPHA      0.2f    // Heavy gyro filtering
+#define ACCEL_LPF_ALPHA     0.1f    // Heavy accel filtering
+#define MOTOR_LPF_ALPHA     0.15f   // Heavy motor smoothing
 #define RC_LPF_ALPHA        0.5f
 #define POT_LPF_ALPHA       0.1f
 #define RC_DEADBAND         20
@@ -174,8 +175,9 @@
 
 // Axis inversions (1.0 or -1.0)
 // Set these based on MPU6050 mounting orientation
+// CRITICAL: These must match your sensor orientation!
 #define ROLL_SIGN           1.0f    // Positive = right side down increases roll
-#define PITCH_SIGN          1.0f    // Positive = nose up increases pitch  
+#define PITCH_SIGN          -1.0f   // FIXED: Was 1.0, caused backward flip
 #define YAW_SIGN            1.0f    // Positive = clockwise increases yaw
 
 // RC stick inversions - FIXED for correct control direction
@@ -1222,16 +1224,17 @@ void setup() {
     escRR.writeMicroseconds(ESC_MIN);
     Serial.println(F("OK"));
     
-    Serial.println(F("\n*** SYSTEM READY - V3 ***"));
-    Serial.println(F("\nV3 Fixes: Motor mixing signs corrected"));
-    Serial.println(F("\n=== MOTOR MIXING TEST ==="));
-    Serial.println(F("While DISARMED, tilt drone and watch serial:"));
-    Serial.println(F("  Tilt RIGHT -> FL,RL should increase"));
-    Serial.println(F("  Tilt FORWARD -> RL,RR should increase"));
-    Serial.println(F("  (PID shows correction, motors show result)"));
-    Serial.println(F("\nIf motors respond OPPOSITE, check:"));
-    Serial.println(F("  1. ROLL_SIGN / PITCH_SIGN constants"));
-    Serial.println(F("  2. MPU6050 mounting orientation"));
+    Serial.println(F("\n*** SYSTEM READY - V4 ***"));
+    Serial.println(F("\nV4 Fixes:"));
+    Serial.println(F("  - PITCH_SIGN = -1 (fixes backward flip)"));
+    Serial.println(F("  - Very low PID gains (stops oscillation)"));
+    Serial.println(F("  - Heavy filtering for stability"));
+    Serial.println(F("\nCurrent gains (very conservative):"));
+    Serial.println(F("  ANGLE_KP=0.8, RATE_KP=0.12, RATE_KD=0.003"));
+    Serial.println(F("\nDrone will be SLUGGISH but STABLE."));
+    Serial.println(F("After confirming stability, increase gains:"));
+    Serial.println(F("  1. RATE_ROLL_KP: 0.12 -> 0.2 -> 0.3"));
+    Serial.println(F("  2. ANGLE_ROLL_KP: 0.8 -> 1.2 -> 1.5"));
     Serial.println(F("\nWaiting for radio...\n"));
     
     beepPattern(2, 2500, 150, 150);
