@@ -1,7 +1,9 @@
 /**
  * ============================================================================
- *          QUADCOPTER REMOTE CONTROLLER - VERIFIED DIRECTIONS
+ *          QUADCOPTER REMOTE CONTROLLER - THROTTLE FIX
  * ============================================================================
+ * 
+ * THROTTLE FIX: Added proper min/max detection and raw value display
  * 
  * RC STICK DIRECTION CONVENTION (Mode 2 - most common):
  * 
@@ -22,6 +24,11 @@
  *   - 2x POTs (A6-A7)
  *   - Switches (D2-D7)
  * 
+ * FOR RS2205/2300KV MOTORS:
+ *   - These are high-power racing motors
+ *   - Ensure ESCs support high refresh rate
+ *   - May need lower PID gains due to faster response
+ * 
  * ============================================================================
  */
 
@@ -33,7 +40,7 @@
 // ============================================================================
 #define RF_CHANNEL          108
 #define SERIAL_BAUD         115200
-#define DEBUG_DIRECTIONS    1       // Enable direction verification output
+#define DEBUG_THROTTLE      1       // Show raw throttle values for debugging
 
 // ============================================================================
 //                            PIN DEFINITIONS
@@ -63,7 +70,7 @@
 // Set these to +1 or -1 to correct stick directions
 // If stick moves opposite to expected, flip the sign
 
-#define THROTTLE_DIRECTION  +1      // +1 = normal, -1 = inverted
+#define THROTTLE_INVERT     false   // Set true if throttle is backwards
 #define YAW_DIRECTION       +1      // +1 = right stick = positive yaw
 #define PITCH_DIRECTION     -1      // -1 = up stick = negative (nose down)
 #define ROLL_DIRECTION      +1      // +1 = right stick = positive (right down)
@@ -74,9 +81,14 @@
 #define DEADBAND            30
 #define EXPO_FACTOR         0.30f   // Exponential curve
 
-#define ADC_SAMPLES         8
-#define JOY_LPF_ALPHA       0.70f   // Slightly faster response
+#define ADC_SAMPLES         4       // Reduced for faster response
+#define JOY_LPF_ALPHA       0.5f    // Faster throttle response
 #define POT_LPF_ALPHA       0.85f
+
+// Throttle specific settings
+#define THROTTLE_MIN_DEFAULT    0       // Default if calibration fails
+#define THROTTLE_MAX_DEFAULT    1023
+#define THROTTLE_MARGIN         50      // Margin for min/max detection
 
 // ============================================================================
 //                         TIMING CONFIGURATION
@@ -133,10 +145,12 @@ uint32_t packetSequence = 0;
 
 // Calibration values
 struct {
-    int16_t thrMin = 0, thrMax = 1023;
+    int16_t thrMin = THROTTLE_MIN_DEFAULT;
+    int16_t thrMax = THROTTLE_MAX_DEFAULT;
     int16_t yawCenter = 512;
     int16_t pitchCenter = 512;
     int16_t rollCenter = 512;
+    bool thrInverted = THROTTLE_INVERT;
     bool valid = false;
 } joyCal;
 
@@ -210,15 +224,18 @@ void readJoysticks() {
     rawRoll = readADC_Averaged(PIN_JOY_ROLL);
     
     // Process throttle (0-1000 range)
+    // Handle both normal and inverted throttle joysticks
     int16_t thrScaled;
-    if (THROTTLE_DIRECTION > 0) {
-        thrScaled = map(rawThrottle, joyCal.thrMin, joyCal.thrMax, 0, 1000);
-    } else {
+    if (joyCal.thrInverted) {
+        // Inverted: high ADC = low throttle
         thrScaled = map(rawThrottle, joyCal.thrMax, joyCal.thrMin, 0, 1000);
+    } else {
+        // Normal: low ADC = low throttle
+        thrScaled = map(rawThrottle, joyCal.thrMin, joyCal.thrMax, 0, 1000);
     }
     thrScaled = constrain(thrScaled, 0, 1000);
     
-    // Apply deadband to centered sticks
+    // Apply deadband to centered sticks (not throttle!)
     int16_t yawDev = applyDeadband(rawYaw, joyCal.yawCenter, DEADBAND);
     int16_t pitchDev = applyDeadband(rawPitch, joyCal.pitchCenter, DEADBAND);
     int16_t rollDev = applyDeadband(rawRoll, joyCal.rollCenter, DEADBAND);
@@ -234,8 +251,8 @@ void readJoysticks() {
     float pitchExpo = applyExpo(pitchScaled, EXPO_FACTOR);
     float rollExpo = applyExpo(rollScaled, EXPO_FACTOR);
     
-    // Apply low-pass filter
-    throttle = lowPassFilter(throttle, thrScaled, JOY_LPF_ALPHA);
+    // Apply low-pass filter (faster for throttle)
+    throttle = lowPassFilter(throttle, thrScaled, 0.3f);  // Fast response for throttle
     yaw = lowPassFilter(yaw, yawExpo, JOY_LPF_ALPHA);
     pitch = lowPassFilter(pitch, pitchExpo, JOY_LPF_ALPHA);
     roll = lowPassFilter(roll, rollExpo, JOY_LPF_ALPHA);
@@ -298,56 +315,98 @@ void readSwitches() {
 //                      CALIBRATE JOYSTICKS
 // ============================================================================
 void calibrateJoysticks() {
-    Serial.println(F("\n*** JOYSTICK CALIBRATION ***"));
-    Serial.println(F("Step 1: Keep ALL sticks CENTERED"));
-    Serial.println(F("        Keep throttle at MINIMUM"));
+    Serial.println(F("\n========================================"));
+    Serial.println(F("       JOYSTICK CALIBRATION"));
+    Serial.println(F("========================================"));
+    
+    // Step 1: Read current throttle position (should be at minimum)
+    Serial.println(F("\nStep 1: Keep THROTTLE at MINIMUM (stick DOWN)"));
+    Serial.println(F("        Keep other sticks CENTERED"));
     Serial.println(F("Starting in 3 seconds..."));
     
-    delay(3000);
+    for (int i = 3; i > 0; i--) {
+        Serial.print(i); Serial.print(F("... "));
+        delay(1000);
+    }
+    Serial.println();
     
-    // Sample centers
-    int32_t sumThr = 0, sumYaw = 0, sumPitch = 0, sumRoll = 0;
+    // Sample throttle minimum and other centers
+    int32_t sumThrMin = 0, sumYaw = 0, sumPitch = 0, sumRoll = 0;
+    Serial.print(F("Reading"));
     for (int i = 0; i < 100; i++) {
-        sumThr += analogRead(PIN_JOY_THROTTLE);
+        sumThrMin += analogRead(PIN_JOY_THROTTLE);
         sumYaw += analogRead(PIN_JOY_YAW);
         sumPitch += analogRead(PIN_JOY_PITCH);
         sumRoll += analogRead(PIN_JOY_ROLL);
+        if (i % 20 == 0) Serial.print(F("."));
         delay(10);
     }
+    Serial.println(F(" done"));
     
-    joyCal.thrMin = sumThr / 100;
+    int16_t thrMinReading = sumThrMin / 100;
     joyCal.yawCenter = sumYaw / 100;
     joyCal.pitchCenter = sumPitch / 100;
     joyCal.rollCenter = sumRoll / 100;
     
-    Serial.print(F("Throttle min: ")); Serial.println(joyCal.thrMin);
+    Serial.print(F("Throttle MIN reading: ")); Serial.println(thrMinReading);
     Serial.print(F("Yaw center: ")); Serial.println(joyCal.yawCenter);
     Serial.print(F("Pitch center: ")); Serial.println(joyCal.pitchCenter);
     Serial.print(F("Roll center: ")); Serial.println(joyCal.rollCenter);
     
-    Serial.println(F("\nStep 2: Move THROTTLE to MAXIMUM"));
-    Serial.println(F("Hold for 2 seconds..."));
+    // Step 2: Read throttle maximum
+    Serial.println(F("\nStep 2: Move THROTTLE to MAXIMUM (stick UP)"));
+    Serial.println(F("Hold it there..."));
     delay(2000);
     
-    sumThr = 0;
-    for (int i = 0; i < 50; i++) {
-        sumThr += analogRead(PIN_JOY_THROTTLE);
-        delay(20);
+    int32_t sumThrMax = 0;
+    Serial.print(F("Reading"));
+    for (int i = 0; i < 100; i++) {
+        sumThrMax += analogRead(PIN_JOY_THROTTLE);
+        if (i % 20 == 0) Serial.print(F("."));
+        delay(10);
     }
-    joyCal.thrMax = sumThr / 50;
+    Serial.println(F(" done"));
     
-    Serial.print(F("Throttle max: ")); Serial.println(joyCal.thrMax);
+    int16_t thrMaxReading = sumThrMax / 100;
+    Serial.print(F("Throttle MAX reading: ")); Serial.println(thrMaxReading);
     
-    // Swap if inverted
-    if (joyCal.thrMin > joyCal.thrMax) {
-        int16_t temp = joyCal.thrMin;
-        joyCal.thrMin = joyCal.thrMax;
-        joyCal.thrMax = temp;
-        Serial.println(F("(Throttle direction auto-corrected)"));
+    // Determine if throttle is inverted
+    // Normal: MIN position gives LOW ADC value
+    // Inverted: MIN position gives HIGH ADC value
+    if (thrMinReading > thrMaxReading) {
+        // Throttle is INVERTED (high ADC at min position)
+        joyCal.thrMin = thrMaxReading;  // Lower ADC value
+        joyCal.thrMax = thrMinReading;  // Higher ADC value
+        joyCal.thrInverted = true;
+        Serial.println(F("Throttle detected as INVERTED"));
+    } else {
+        // Throttle is NORMAL (low ADC at min position)
+        joyCal.thrMin = thrMinReading;
+        joyCal.thrMax = thrMaxReading;
+        joyCal.thrInverted = false;
+        Serial.println(F("Throttle detected as NORMAL"));
     }
+    
+    // Validate range
+    int16_t thrRange = joyCal.thrMax - joyCal.thrMin;
+    if (thrRange < 200) {
+        Serial.println(F("\n*** WARNING: Throttle range too small! ***"));
+        Serial.println(F("Check wiring or use default values."));
+        joyCal.thrMin = 0;
+        joyCal.thrMax = 1023;
+        joyCal.thrInverted = THROTTLE_INVERT;
+    }
+    
+    Serial.println(F("\n--- CALIBRATION SUMMARY ---"));
+    Serial.print(F("Throttle: ")); Serial.print(joyCal.thrMin);
+    Serial.print(F(" - ")); Serial.print(joyCal.thrMax);
+    Serial.print(F(" (inverted: ")); Serial.print(joyCal.thrInverted ? "YES" : "NO");
+    Serial.println(F(")"));
+    Serial.print(F("Range: ")); Serial.println(thrRange);
     
     joyCal.valid = true;
-    Serial.println(F("\n*** CALIBRATION COMPLETE ***\n"));
+    Serial.println(F("\n*** CALIBRATION COMPLETE ***"));
+    Serial.println(F("Move throttle up/down to verify it works.\n"));
 }
 
 // ============================================================================
@@ -451,40 +510,37 @@ void updateLED() {
 void printDebug() {
     // Packet stats
     Serial.print(F("TX:")); Serial.print(packetsSent);
-    Serial.print(F(" FAIL:")); Serial.print(packetsFailed);
     
-    if (packetsSent > 0) {
-        float rate = 100.0f * packetsSent / (packetsSent + packetsFailed);
-        Serial.print(F(" (")); Serial.print(rate, 1); Serial.print(F("%)"));
+    if (packetsFailed > 0) {
+        Serial.print(F(" FAIL:")); Serial.print(packetsFailed);
     }
     
-    // Stick values
+#if DEBUG_THROTTLE
+    // Show RAW throttle value for debugging
+    Serial.print(F(" | RAW:")); Serial.print(rawThrottle);
+#endif
+    
+    // Stick values (processed)
     Serial.print(F(" | T:")); Serial.print((int)throttle);
     Serial.print(F(" Y:")); Serial.print((int)yaw);
     Serial.print(F(" P:")); Serial.print((int)pitch);
     Serial.print(F(" R:")); Serial.print((int)roll);
     
-#if DEBUG_DIRECTIONS
-    // Direction indicators
-    Serial.print(F(" |"));
-    if (abs(yaw) > 50) Serial.print(yaw > 0 ? F(" YAW→") : F(" YAW←"));
-    if (abs(pitch) > 50) Serial.print(pitch < 0 ? F(" NOSE↓") : F(" NOSE↑"));
-    if (abs(roll) > 50) Serial.print(roll > 0 ? F(" BANK→") : F(" BANK←"));
-#endif
+    // Throttle bar visualization
+    Serial.print(F(" ["));
+    int bars = (int)throttle / 100;  // 0-10 bars
+    for (int i = 0; i < 10; i++) {
+        Serial.print(i < bars ? F("#") : F("-"));
+    }
+    Serial.print(F("]"));
     
-    // POT values
-    float gainMult = map(potGain, 0, 1023, 50, 150) / 100.0f;
-    uint8_t angleLimit = map(potAngle, 0, 1023, 15, 45);
-    Serial.print(F(" | G:")); Serial.print(gainMult, 2);
-    Serial.print(F("x A:")); Serial.print(angleLimit); Serial.print(F("°"));
-    
-    // Mode
-    Serial.print(F(" | "));
-    Serial.print(flightMode == FMODE_ANGLE ? F("ANG") :
-                flightMode == FMODE_HORIZON ? F("HOR") : F("ACR"));
+    // Direction indicators for other sticks
+    if (abs(yaw) > 50) Serial.print(yaw > 0 ? F(" Y>") : F(" <Y"));
+    if (abs(pitch) > 50) Serial.print(pitch < 0 ? F(" Pv") : F(" P^"));
+    if (abs(roll) > 50) Serial.print(roll > 0 ? F(" R>") : F(" <R"));
     
     // Arm status
-    if (swArm) Serial.print(F(" [ARMED]"));
+    if (swArm) Serial.print(F(" [ARM]"));
     
     Serial.println();
 }

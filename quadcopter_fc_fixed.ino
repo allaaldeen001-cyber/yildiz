@@ -58,11 +58,17 @@
 // ============================================================================
 //                          ESC PARAMETERS
 // ============================================================================
+// For RS2205/2300KV motors - these are POWERFUL racing motors!
+// Start with lower throttle range for safety
+
 #define ESC_MIN             1000
 #define ESC_MAX             2000
-#define ESC_IDLE            1150    // Reduced idle for smoother startup
-#define ESC_ARM_THR         50
-#define ESC_MAX_THROTTLE    1800    // Increased max throttle
+#define ESC_IDLE            1100    // Low idle for 2300KV motors
+#define ESC_ARM_THR         100     // Increased threshold for arming check
+#define ESC_MAX_THROTTLE    1700    // Limited max for safety with powerful motors
+
+// Debug throttle reception
+#define DEBUG_THROTTLE      1       // Show received throttle values
 
 // ============================================================================
 //                    MOTOR TRIM - ADJUSTED FOR RR DRIFT
@@ -95,8 +101,10 @@
 #define MAX_GYRO_RATE       400.0f  // Max rotation rate deg/s
 
 // ============================================================================
-//             CASCADED PID GAINS - TUNED FOR STABILITY
+//             CASCADED PID GAINS - FOR RS2205/2300KV MOTORS
 // ============================================================================
+// 
+// RS2205/2300KV motors are VERY responsive - need LOWER gains!
 // 
 // TUNING NOTES:
 //   - If oscillating: REDUCE RATE_KP, INCREASE RATE_KD
@@ -106,27 +114,27 @@
 //
 
 // OUTER LOOP - Angle PID (angle error → target rate)
-#define ANGLE_ROLL_KP       2.5f    // Reduced from 3.0 for less overshoot
-#define ANGLE_ROLL_KI       0.02f   // Small I for drift correction
+#define ANGLE_ROLL_KP       2.0f    // Low for powerful motors
+#define ANGLE_ROLL_KI       0.01f   // Small I for drift correction
 #define ANGLE_ROLL_KD       0.0f    // Inner loop handles D
 
-#define ANGLE_PITCH_KP      2.5f
-#define ANGLE_PITCH_KI      0.02f
+#define ANGLE_PITCH_KP      2.0f
+#define ANGLE_PITCH_KI      0.01f
 #define ANGLE_PITCH_KD      0.0f
 
 // INNER LOOP - Rate PID (rate error → motor output)
-// These are CRITICAL for stopping oscillation
-#define RATE_ROLL_KP        0.35f   // Reduced from 0.5 - less aggressive
+// LOWER gains for 2300KV motors - they respond fast!
+#define RATE_ROLL_KP        0.25f   // Low for powerful motors
 #define RATE_ROLL_KI        0.0f    // Keep at 0 to prevent oscillation
-#define RATE_ROLL_KD        0.025f  // Increased from 0.015 - more damping
+#define RATE_ROLL_KD        0.020f  // Damping
 
-#define RATE_PITCH_KP       0.35f
+#define RATE_PITCH_KP       0.25f
 #define RATE_PITCH_KI       0.0f
-#define RATE_PITCH_KD       0.025f
+#define RATE_PITCH_KD       0.020f
 
 // YAW (single loop)
-#define PID_YAW_KP          1.2f    // Reduced from 1.5
-#define PID_YAW_KI          0.01f   // Small I for yaw hold
+#define PID_YAW_KP          0.8f    // Low for powerful motors
+#define PID_YAW_KI          0.005f  // Small I for yaw hold
 #define PID_YAW_KD          0.0f
 
 // PID limits
@@ -699,14 +707,24 @@ void processCommands() {
         return;
     }
     
-    // Get raw commands and apply RC inversions
+    // Get raw commands from packet
+    // rxPacket.throttle should be 0-1000 from remote
     float rawThrottle = rxPacket.throttle;
     float rawRoll = applyDeadband(rxPacket.roll * RC_ROLL_INVERT, RC_DEADBAND);
     float rawPitch = applyDeadband(rxPacket.pitch * RC_PITCH_INVERT, RC_DEADBAND);
     float rawYaw = applyDeadband(rxPacket.yaw * RC_YAW_INVERT, RC_DEADBAND);
     
+    // Debug: Print raw throttle from packet occasionally
+    static uint32_t lastThrDebug = 0;
+    if (millis() - lastThrDebug > 1000) {
+        lastThrDebug = millis();
+        Serial.print(F("RX Packet THR: ")); Serial.print(rxPacket.throttle);
+        Serial.print(F(" -> filtered: ")); Serial.println((int)throttleCmd);
+    }
+    
     // Apply low-pass filter for smooth control
-    throttleCmd = lowPassFilter(throttleCmd, rawThrottle, RC_LPF_ALPHA);
+    // Use faster filter for throttle (0.3) for quicker response
+    throttleCmd = lowPassFilter(throttleCmd, rawThrottle, 0.4f);
     rollCmd = lowPassFilter(rollCmd, rawRoll, RC_LPF_ALPHA);
     pitchCmd = lowPassFilter(pitchCmd, rawPitch, RC_LPF_ALPHA);
     yawCmd = lowPassFilter(yawCmd, rawYaw, RC_LPF_ALPHA);
@@ -998,17 +1016,22 @@ void printDebug() {
     else if (flightState == EMERGENCY) Serial.print(F("EMG "));
     else Serial.print(F("DIS "));
     
+#if DEBUG_THROTTLE
+    // Show received throttle command
+    Serial.print(F("| THR:")); Serial.print((int)throttleCmd);
+    
+    // Throttle bar visualization
+    Serial.print(F(" ["));
+    int bars = (int)throttleCmd / 100;
+    for (int i = 0; i < 10; i++) {
+        Serial.print(i < bars ? '#' : '-');
+    }
+    Serial.print(F("] "));
+#endif
+    
     // Angles
     Serial.print(F("| R:")); Serial.print(roll, 1);
     Serial.print(F(" P:")); Serial.print(pitch, 1);
-    
-    // Rates
-    Serial.print(F(" | Rt:")); Serial.print(rollRate, 0);
-    Serial.print(F(",")); Serial.print(pitchRate, 0);
-    
-    // PID outputs
-    Serial.print(F(" | PID:")); Serial.print(rollPID, 0);
-    Serial.print(F(",")); Serial.print(pitchPID, 0);
     
     // Motor values
     Serial.print(F(" | M:")); Serial.print(motorFL);
@@ -1016,14 +1039,15 @@ void printDebug() {
     Serial.print(F(",")); Serial.print(motorRL);
     Serial.print(F(",")); Serial.print(motorRR);
     
-    // Motor balance diagnostic
-    int16_t diff_LR = (motorFL + motorRL) - (motorFR + motorRR);
-    int16_t diff_FB = (motorFL + motorFR) - (motorRL + motorRR);
-    Serial.print(F(" | Bal L-R:")); Serial.print(diff_LR);
-    Serial.print(F(" F-B:")); Serial.print(diff_FB);
+    // Radio status
+    if (!radioConnected) {
+        Serial.print(F(" [NO RADIO]"));
+    } else {
+        Serial.print(F(" [RF OK]"));
+    }
     
     // Loop rate
-    Serial.print(F(" | Hz:")); Serial.print(loopCount * 5);  // 5Hz debug rate
+    Serial.print(F(" Hz:")); Serial.print(loopCount * 5);
     loopCount = 0;
     
     Serial.println();
