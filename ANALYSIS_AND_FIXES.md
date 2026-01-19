@@ -166,12 +166,38 @@ if (dt < 0.0001f) dt = 0.002f;  // Reset if too small
 
 ## Summary of Changes
 
-| Parameter | Original | Fixed | Reason |
-|-----------|----------|-------|--------|
-| Motor mixing signs | Inconsistent | Corrected | Fix drift direction |
-| TRIM values | 40/60/110/60 | 0/0/0/0 | Remove compensation |
-| ESC_IDLE | 1300 | 1150 | Better low-throttle control |
-| D_TERM_LPF_ALPHA | 0.2 | 0.15 | More filtering |
-| OUTPUT_RATE_LIMIT | 30 | 20 | Smoother response |
-| GYRO_LPF_ALPHA | 0.5 | 0.4 | More filtering |
-| Axis inversions | Inconsistent | Unified | Correct stabilization |
+| Parameter | Original | Fixed V1 | Fixed V2 | Reason |
+|-----------|----------|----------|----------|--------|
+| Motor mixing signs | Inconsistent | Corrected | - | Fix drift direction |
+| TRIM values | 40/60/110/60 | 0/0/0/0 | - | Remove compensation |
+| ESC_IDLE | 1300 | 1150 | - | Better low-throttle control |
+| RC_ROLL_SIGN | -1.0 | 1.0 | **-1.0** | Fix inverted roll control |
+| RC_YAW_SIGN | -1.0 | -1.0 | **1.0** | Fix inverted yaw control |
+| ANGLE_ROLL_KP | 3.0 | 2.5 | **1.5** | Reduce shaking |
+| RATE_ROLL_KP | 0.5 | 0.6 | **0.25** | Main cause of shaking |
+| RATE_ROLL_KD | 0.015 | 0.025 | **0.008** | D amplifies noise |
+| D_TERM_LPF_ALPHA | 0.2 | 0.15 | **0.08** | More filtering |
+| GYRO_LPF_ALPHA | 0.5 | 0.4 | **0.3** | More filtering |
+| MOTOR_LPF_ALPHA | 0.4 | 0.3 | **0.2** | Smoother motors |
+| OUTPUT_RATE_LIMIT | 30 | 20 | **15** | Smoother response |
+| All I gains | Various | Small | **0** | Start without I term |
+
+---
+
+## V2 Fixes (Shaking and Inverted Controls)
+
+### Issue: Inverted Roll and Yaw Controls
+- Stick left → drone went right
+- Yaw stick right → drone rotated left
+
+**Fix:** Flipped `RC_ROLL_SIGN` and `RC_YAW_SIGN`
+
+### Issue: Drone Shaking
+Shaking is caused by PID overcorrection. The control loop corrects too aggressively, overshoots, corrects back, overshoots again = oscillation/shaking.
+
+**Fixes:**
+1. Reduced `RATE_KP` from 0.6 to 0.25 (most important)
+2. Reduced `RATE_KD` from 0.025 to 0.008 (D amplifies gyro noise)
+3. Reduced `ANGLE_KP` from 2.5 to 1.5
+4. Set all I gains to 0 (add later if needed)
+5. Increased filtering on gyro, D-term, and motors
