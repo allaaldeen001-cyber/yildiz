@@ -104,68 +104,68 @@
 //             CASCADED PID GAINS - FOR RS2205/2300KV MOTORS
 // ============================================================================
 // 
-// RS2205/2300KV motors are VERY responsive - need LOWER gains!
-// 
 // TUNING NOTES:
 //   - If oscillating: REDUCE RATE_KP, INCREASE RATE_KD
-//   - If sluggish: INCREASE ANGLE_KP (slowly)
+//   - If sluggish/no response: INCREASE gains
 //   - If drifting: Add small ANGLE_KI
-//   - If vibrating: REDUCE all gains, increase filtering
+//   - If vibrating: REDUCE RATE_KD, increase filtering
 //
 
 // OUTER LOOP - Angle PID (angle error → target rate)
-#define ANGLE_ROLL_KP       2.0f    // Low for powerful motors
-#define ANGLE_ROLL_KI       0.01f   // Small I for drift correction
+// Higher values = faster response to angle errors
+#define ANGLE_ROLL_KP       4.0f    // INCREASED - was too low
+#define ANGLE_ROLL_KI       0.02f   // Small I for drift correction
 #define ANGLE_ROLL_KD       0.0f    // Inner loop handles D
 
-#define ANGLE_PITCH_KP      2.0f
-#define ANGLE_PITCH_KI      0.01f
+#define ANGLE_PITCH_KP      4.0f    // INCREASED
+#define ANGLE_PITCH_KI      0.02f
 #define ANGLE_PITCH_KD      0.0f
 
 // INNER LOOP - Rate PID (rate error → motor output)
-// LOWER gains for 2300KV motors - they respond fast!
-#define RATE_ROLL_KP        0.25f   // Low for powerful motors
+// These control how aggressively motors respond
+#define RATE_ROLL_KP        0.6f    // INCREASED from 0.25 - was way too low!
 #define RATE_ROLL_KI        0.0f    // Keep at 0 to prevent oscillation
-#define RATE_ROLL_KD        0.020f  // Damping
+#define RATE_ROLL_KD        0.015f  // Damping (reduced to allow more response)
 
-#define RATE_PITCH_KP       0.25f
+#define RATE_PITCH_KP       0.6f    // INCREASED
 #define RATE_PITCH_KI       0.0f
-#define RATE_PITCH_KD       0.020f
+#define RATE_PITCH_KD       0.015f
 
 // YAW (single loop)
-#define PID_YAW_KP          0.8f    // Low for powerful motors
-#define PID_YAW_KI          0.005f  // Small I for yaw hold
+#define PID_YAW_KP          2.0f    // INCREASED from 0.8
+#define PID_YAW_KI          0.01f   // Small I for yaw hold
 #define PID_YAW_KD          0.0f
 
-// PID limits
-#define ANGLE_I_MAX         30.0f   // Max angle integral (deg*sec)
-#define RATE_I_MAX          50.0f   // Max rate integral
-#define RATE_OUTPUT_MAX     250.0f  // Max motor adjustment from rate PID
-#define ANGLE_RATE_MAX      120.0f  // Max target rate from angle loop (deg/sec)
+// PID limits - INCREASED for more authority
+#define ANGLE_I_MAX         50.0f   // Max angle integral
+#define RATE_I_MAX          100.0f  // Max rate integral
+#define RATE_OUTPUT_MAX     400.0f  // INCREASED - allows bigger corrections
+#define ANGLE_RATE_MAX      200.0f  // INCREASED - faster angle corrections
 
 // ============================================================================
 //                    ANTI-OSCILLATION FILTERING
 // ============================================================================
 // Setpoint filter - smooths stick input
-#define SETPOINT_LPF_ALPHA  0.2f    // Reduced from 0.3 - smoother
+// Higher = faster stick response, Lower = smoother but slower
+#define SETPOINT_LPF_ALPHA  0.5f    // INCREASED - was filtering out stick input!
 
 // D-term lowpass - removes HF noise
-#define D_TERM_LPF_ALPHA    0.15f   // Reduced from 0.2 - more filtering
+#define D_TERM_LPF_ALPHA    0.2f    // Slightly increased for response
 
-// Output rate limiter
-#define OUTPUT_RATE_LIMIT   20.0f   // Reduced from 30 - gentler corrections
+// Output rate limiter - max PID change per loop
+#define OUTPUT_RATE_LIMIT   50.0f   // INCREASED from 20 - was too restrictive!
 
 // ============================================================================
 //                    GENERAL FILTERING
 // ============================================================================
-#define GYRO_LPF_ALPHA      0.4f    // More filtering (was 0.5)
-#define ACCEL_LPF_ALPHA     0.2f    // More filtering (was 0.3)
-#define MOTOR_LPF_ALPHA     0.3f    // More smoothing (was 0.4)
-#define RC_LPF_ALPHA        0.5f    // Slightly more filtering
+#define GYRO_LPF_ALPHA      0.6f    // INCREASED - faster gyro response
+#define ACCEL_LPF_ALPHA     0.3f    // Slightly increased
+#define MOTOR_LPF_ALPHA     0.5f    // INCREASED - faster motor response
+#define RC_LPF_ALPHA        0.6f    // INCREASED - faster stick response
 #define POT_LPF_ALPHA       0.1f
 
-#define RC_DEADBAND         25
-#define GYRO_DEADBAND       0.5f    // Increased from 0.3
+#define RC_DEADBAND         20      // Reduced deadband
+#define GYRO_DEADBAND       0.3f    // Reduced deadband
 
 // ============================================================================
 //                    COMPLEMENTARY FILTER
@@ -299,8 +299,8 @@ struct SimplePIDState {
 } pidYawState;
 
 float rollPID = 0, pitchPID = 0, yawPID = 0;
-float gainMultiplier = 1.0f;
-float maxAngle = 25.0f;
+float gainMultiplier = 1.0f;   // PID gain multiplier (0.8 - 1.5 from pot)
+float maxAngle = 30.0f;        // Max tilt angle in ANGLE mode (20-45 from pot)
 
 // ============================================================================
 //                         RADIO VARIABLES
@@ -666,11 +666,14 @@ void updateRadio() {
             uint8_t gainVal = (packet.auxData >> 4) & 0x0F;
             uint8_t angleVal = packet.auxData & 0x0F;
             
-            float targetGain = map(gainVal, 0, 15, 50, 150) / 100.0f;
-            float targetAngle = map(angleVal, 0, 15, 15, 35);
+            // Gain range: 0.8 to 1.5 (more reasonable range, never too low)
+            float targetGain = map(gainVal, 0, 15, 80, 150) / 100.0f;
+            // Angle range: 20 to 45 degrees (never too small)
+            float targetAngle = map(angleVal, 0, 15, 20, 45);
             
-            gainMultiplier = lowPassFilter(gainMultiplier, targetGain, POT_LPF_ALPHA);
-            maxAngle = lowPassFilter(maxAngle, targetAngle, POT_LPF_ALPHA);
+            // Faster filter response for pots
+            gainMultiplier = lowPassFilter(gainMultiplier, targetGain, 0.3f);
+            maxAngle = lowPassFilter(maxAngle, targetAngle, 0.3f);
             
             // Decode flight mode
             bool fmodeBit = packet.switches & (1 << SW_FLIGHTMODE);
@@ -714,12 +717,16 @@ void processCommands() {
     float rawPitch = applyDeadband(rxPacket.pitch * RC_PITCH_INVERT, RC_DEADBAND);
     float rawYaw = applyDeadband(rxPacket.yaw * RC_YAW_INVERT, RC_DEADBAND);
     
-    // Debug: Print raw throttle from packet occasionally
-    static uint32_t lastThrDebug = 0;
-    if (millis() - lastThrDebug > 1000) {
-        lastThrDebug = millis();
-        Serial.print(F("RX Packet THR: ")); Serial.print(rxPacket.throttle);
-        Serial.print(F(" -> filtered: ")); Serial.println((int)throttleCmd);
+    // Debug: Print received commands occasionally
+    static uint32_t lastCmdDebug = 0;
+    if (millis() - lastCmdDebug > 500) {
+        lastCmdDebug = millis();
+        Serial.print(F("RX: T=")); Serial.print(rxPacket.throttle);
+        Serial.print(F(" R=")); Serial.print(rxPacket.roll);
+        Serial.print(F(" P=")); Serial.print(rxPacket.pitch);
+        Serial.print(F(" Y=")); Serial.print(rxPacket.yaw);
+        Serial.print(F(" -> Cmd R=")); Serial.print((int)rollCmd);
+        Serial.print(F(" P=")); Serial.println((int)pitchCmd);
     }
     
     // Apply low-pass filter for smooth control
@@ -883,8 +890,19 @@ void updatePID(float dt) {
     float adjRollRate = rollRate * ROLL_INVERT;
     float adjPitchRate = pitchRate * PITCH_INVERT;
     
+    // Debug target angles occasionally
+    static uint32_t lastPidDebug = 0;
+    if (millis() - lastPidDebug > 2000) {
+        lastPidDebug = millis();
+        Serial.print(F("PID Debug: maxAngle=")); Serial.print(maxAngle);
+        Serial.print(F(" gain=")); Serial.print(gainMultiplier);
+        Serial.print(F(" rollCmd=")); Serial.print((int)rollCmd);
+        Serial.print(F(" pitchCmd=")); Serial.println((int)pitchCmd);
+    }
+    
     if (flightMode == FMODE_ANGLE) {
         // ANGLE MODE: Cascaded PID for stability
+        // Convert stick command (-500 to +500) to target angle
         float targetRoll = (rollCmd / 500.0f) * maxAngle;
         float targetPitch = (pitchCmd / 500.0f) * maxAngle;
         
@@ -1016,22 +1034,20 @@ void printDebug() {
     else if (flightState == EMERGENCY) Serial.print(F("EMG "));
     else Serial.print(F("DIS "));
     
-#if DEBUG_THROTTLE
-    // Show received throttle command
-    Serial.print(F("| THR:")); Serial.print((int)throttleCmd);
+    // Throttle
+    Serial.print(F("T:")); Serial.print((int)throttleCmd);
     
-    // Throttle bar visualization
-    Serial.print(F(" ["));
-    int bars = (int)throttleCmd / 100;
-    for (int i = 0; i < 10; i++) {
-        Serial.print(i < bars ? '#' : '-');
-    }
-    Serial.print(F("] "));
-#endif
+    // Stick commands (what remote is sending)
+    Serial.print(F(" Stk R:")); Serial.print((int)rollCmd);
+    Serial.print(F(" P:")); Serial.print((int)pitchCmd);
     
-    // Angles
-    Serial.print(F("| R:")); Serial.print(roll, 1);
+    // Actual angles (what IMU sees)
+    Serial.print(F(" | Ang R:")); Serial.print(roll, 1);
     Serial.print(F(" P:")); Serial.print(pitch, 1);
+    
+    // PID outputs (what correction is being applied)
+    Serial.print(F(" | PID R:")); Serial.print((int)rollPID);
+    Serial.print(F(" P:")); Serial.print((int)pitchPID);
     
     // Motor values
     Serial.print(F(" | M:")); Serial.print(motorFL);
@@ -1041,16 +1057,11 @@ void printDebug() {
     
     // Radio status
     if (!radioConnected) {
-        Serial.print(F(" [NO RADIO]"));
-    } else {
-        Serial.print(F(" [RF OK]"));
+        Serial.print(F(" [NO RF]"));
     }
     
-    // Loop rate
-    Serial.print(F(" Hz:")); Serial.print(loopCount * 5);
-    loopCount = 0;
-    
     Serial.println();
+    loopCount = 0;
 #endif
 }
 
